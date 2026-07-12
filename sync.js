@@ -53,7 +53,15 @@ function initGoogleSync(){
     _tokenClient = google.accounts.oauth2.initTokenClient({
       client_id: GOOGLE_CLIENT_ID, scope: DRIVE_SCOPE,
       callback: (resp)=>{
-        if(resp.error){ setSyncStatus('error','login'); return; }
+        if(resp.error){
+          console.error('OAuth error:', resp);
+          setSyncStatus('error', resp.error);
+          alert('เชื่อม Google ไม่สำเร็จ\n\nError: '+resp.error+'\n'+(resp.error_description||'')+
+                '\n\nสาเหตุที่พบบ่อย:\n'+
+                '• origin ไม่ตรง — ต้องใส่ '+window.location.origin+' ใน Google Cloud\n'+
+                '• ยังไม่ได้เพิ่มอีเมลตัวเองใน Test users');
+          return;
+        }
         _accessToken = resp.access_token;
         gapi.client.setToken({access_token:_accessToken});
         syncEnabled = true;
@@ -73,9 +81,12 @@ function maybeEnableSync(){
 // ---- user clicks "Connect Drive" ----
 function connectDrive(){
   if(GOOGLE_CLIENT_ID.startsWith('PASTE_')){
-    toast('ยังไม่ได้ตั้งค่า Google Client ID'); return;
+    alert('ยังไม่ได้ใส่ Google Client ID ในไฟล์ sync.js'); return;
   }
-  if(!_tokenClient){ toast('กำลังโหลด Google... ลองอีกครั้ง'); return; }
+  if(!_tokenClient){
+    alert('Google ยังโหลดไม่เสร็จ\n\nกด "ตรวจสอบ" เพื่อดูสาเหตุ\nหรือรอ 5 วินาทีแล้วลองใหม่');
+    return;
+  }
   _tokenClient.requestAccessToken({prompt: _accessToken ? '' : 'consent'});
 }
 
@@ -213,6 +224,49 @@ function markLocalChange(){
   if(!syncEnabled) return;
   clearTimeout(_syncTimer);
   _syncTimer = setTimeout(syncToDrive, 2500); // debounce: sync 2.5s after last change
+}
+
+
+// ---- DIAGNOSTIC: tells you exactly what's blocking the sync ----
+function diagnoseSync(){
+  const lines = [];
+  const ok = (s)=>'✅ '+s, bad = (s)=>'❌ '+s, warn=(s)=>'⚠️ '+s;
+
+  // 1. Is sync.js even loaded?
+  lines.push(ok('sync.js โหลดแล้ว'));
+
+  // 2. Client ID set?
+  if(GOOGLE_CLIENT_ID.startsWith('PASTE_')){
+    lines.push(bad('ยังไม่ได้ใส่ Client ID ใน sync.js'));
+  } else if(!GOOGLE_CLIENT_ID.endsWith('.apps.googleusercontent.com')){
+    lines.push(bad('Client ID รูปแบบผิด — ต้องลงท้ายด้วย .apps.googleusercontent.com'));
+    lines.push('   ที่ใส่ไว้: '+GOOGLE_CLIENT_ID.slice(0,40)+'...');
+  } else {
+    lines.push(ok('Client ID: ...'+GOOGLE_CLIENT_ID.slice(-30)));
+  }
+
+  // 3. Origin — the #1 cause of failure
+  lines.push('📍 Origin ของหน้านี้: '+window.location.origin);
+  lines.push('   (ค่านี้ต้องตรงกับ Authorized JavaScript origins ใน Google Cloud เป๊ะๆ)');
+
+  // 4. Protocol check
+  if(window.location.protocol === 'file:'){
+    lines.push(bad('เปิดจากไฟล์ในเครื่อง (file://) — Google ไม่อนุญาต ต้องเปิดจาก URL เว็บ'));
+  } else {
+    lines.push(ok('เปิดจากเว็บ ('+window.location.protocol+') ถูกต้อง'));
+  }
+
+  // 5. Google libraries loaded?
+  lines.push(typeof gapi!=='undefined' ? ok('Google API (gapi) โหลดแล้ว') : bad('gapi ยังไม่โหลด — เช็คอินเทอร์เน็ต/ตัวบล็อกโฆษณา'));
+  lines.push(typeof google!=='undefined' && google.accounts ? ok('Google Identity โหลดแล้ว') : bad('Google Identity ยังไม่โหลด'));
+  lines.push(_gapiInited ? ok('gapi client พร้อม') : warn('gapi client ยังไม่พร้อม (รอสักครู่แล้วลองใหม่)'));
+  lines.push(_tokenClient ? ok('Token client พร้อม') : bad('Token client ยังไม่พร้อม'));
+  lines.push(syncEnabled ? ok('เชื่อม Drive แล้ว') : warn('ยังไม่ได้เชื่อม Drive (กดปุ่มเชื่อม Drive)'));
+
+  const msg = lines.join('\n');
+  console.log(msg);
+  alert('=== ตรวจสอบระบบ Sync ===\n\n'+msg);
+  return msg;
 }
 
 // Initialize on load

@@ -1,4 +1,3 @@
-
 /* ═══════════════════════════════════════════════════════════════════════
    เงินของฉัน — Personal Finance App  (single-file, offline, localStorage)
    ───────────────────────────────────────────────────────────────────────
@@ -121,9 +120,14 @@ function buildSeedHoldings(){
 }
 
 // ============ CATEGORY CLASSIFICATION ============
-const INCOME_CATS = META.cats.filter(c => /Salary|Income|Interest|Selling|Award/.test(c));
-const TRANSFER_CATS = META.cats.filter(c => /transfer|Withdrawal/.test(c));
-const EXPENSE_CATS = META.cats.filter(c => !INCOME_CATS.includes(c) && c!=='Investment' && !TRANSFER_CATS.includes(c));
+// These are rebuilt after META.cats loads from Drive (public data.js has empty cats)
+let INCOME_CATS = [], TRANSFER_CATS = [], EXPENSE_CATS = [];
+function rebuildCategories(){
+  INCOME_CATS = META.cats.filter(c => /Salary|Income|Interest|Selling|Award/.test(c));
+  TRANSFER_CATS = META.cats.filter(c => /transfer|Withdrawal/.test(c));
+  EXPENSE_CATS = META.cats.filter(c => !INCOME_CATS.includes(c) && c!=='Investment' && !TRANSFER_CATS.includes(c));
+}
+rebuildCategories();  // initial (empty until Drive loads)
 
 function txType(t){
   if(t.ty) return t.ty;  // explicit type on new records
@@ -217,6 +221,17 @@ function setType(type){
   if(type==='expense'||type==='income') fillCategories();
   if(type==='debt'){ updateDebtForm(); }
 }
+
+// Refresh all UI lists after data/config loads from Drive
+function refreshAfterLoad(){
+  rebuildCategories();
+  if(typeof rebuildDerived==='function') rebuildDerived();
+  if(typeof fillWallets==='function') fillWallets();
+  if(typeof fillCategories==='function') fillCategories();
+  if(typeof initPeriodSelectors==='function') initPeriodSelectors();
+  if(typeof initDivYear==='function') initDivYear();
+}
+
 function fillCategories(){
   const sel = document.getElementById('f-category');
   let cats = curType==='income' ? INCOME_CATS : EXPENSE_CATS;
@@ -600,7 +615,8 @@ function importFile(e){
       if(obj.meta){ if(obj.meta.cats) META.cats=obj.meta.cats; if(obj.meta.wallets) META.wallets=obj.meta.wallets; }
       if(obj.tx){ txData=obj.tx; holdings=obj.holdings||holdings; cashBalances=obj.cash||{}; }
       else if(Array.isArray(obj)){ txData=obj; }
-      if(confirm('นำเข้าข้อมูลสำเร็จ? (แทนที่ของเดิม)')){ saveTxData(); saveHoldings(); toast('นำเข้าแล้ว ✓'); closeSync(); initPeriodSelectors(); renderList(); }
+      refreshAfterLoad();
+      if(confirm('นำเข้าข้อมูลสำเร็จ? (แทนที่ของเดิม)')){ saveTxData(); saveHoldings(); toast('นำเข้าแล้ว ✓'); closeSync(); refreshAfterLoad(); renderList(); }
     } else {
       const imported=parseCSV(txt);
       if(confirm('นำเข้า '+imported.length+' รายการ?')){ txData=imported; saveTxData(); toast('นำเข้าแล้ว ✓'); closeSync(); initPeriodSelectors(); renderList(); }
@@ -1541,4 +1557,3 @@ document.getElementById('f-date').value=today();
 initPeriodSelectors();
 setType('expense');
 try{ renderLoan(); renderHealth(); renderDebt(); initDivYear(); }catch(e){console.log(e);}
-

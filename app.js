@@ -1157,6 +1157,9 @@ function walletCashReserve(wallet){
 function walletBalance(wallet){
   if(walletOverrides[wallet]!==undefined) return overrideBalance(wallet);
   if(PURCHASE_LOG_WALLETS.includes(wallet)) return null; // purchase log = no balance concept
+  // credit card = show the ACTUAL debt owed (negative), using the dated baseline —
+  // NOT the raw sum of every charge ever logged (which ignores past bill payments)
+  if(accountType(wallet)==='credit_card') return -getDebtBalance(wallet);
   if(WALLET_PORTS[wallet]) return walletCashReserve(wallet);
   return walletRawBalance(wallet);
 }

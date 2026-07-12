@@ -6,7 +6,7 @@
 // ╚══════════════════════════════════════════════════════════════════╝
 
 // ⬇️⬇️⬇️  PASTE YOUR CLIENT ID HERE (from Google Cloud Console)  ⬇️⬇️⬇️
-const GOOGLE_CLIENT_ID = 'PASTE_YOUR_CLIENT_ID_HERE.apps.googleusercontent.com';
+const GOOGLE_CLIENT_ID = '994423650902-oj9cce0vpm18ip0lpmboc17st8u2na0t.apps.googleusercontent.com';
 // ⬆️⬆️⬆️  ------------------------------------------------------  ⬆️⬆️⬆️
 
 const DRIVE_FILE_NAME = 'myfinance_data.json';

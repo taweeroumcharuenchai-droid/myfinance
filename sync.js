@@ -6,7 +6,7 @@
 // ╚══════════════════════════════════════════════════════════════════╝
 
 // ⬇️⬇️⬇️  PASTE YOUR CLIENT ID HERE (from Google Cloud Console)  ⬇️⬇️⬇️
-const GOOGLE_CLIENT_ID = '994423650902-oj9cce0vpm18ip0lpmboc17st8u2na0t.apps.googleusercontent.com';
+const GOOGLE_CLIENT_ID = 'PASTE_YOUR_CLIENT_ID_HERE.apps.googleusercontent.com';
 // ⬆️⬆️⬆️  ------------------------------------------------------  ⬆️⬆️⬆️
 
 const DRIVE_FILE_NAME = 'myfinance_data.json';
@@ -121,7 +121,6 @@ function applyAppData(d){
   if(d.meta){
     if(d.meta.cats) META.cats = d.meta.cats;
     if(d.meta.wallets) META.wallets = d.meta.wallets;
-    if(typeof initSelectors==='function') initSelectors();
   }
   if(d.tx) txData = d.tx;
   if(d.holdings) holdings = d.holdings;
@@ -134,6 +133,8 @@ function applyAppData(d){
   localStorage.setItem('myfinance_cardbal_v2', JSON.stringify(cardBalances));
   localStorage.setItem('myfinance_wallet_override_v2', JSON.stringify(walletOverrides));
   saveNW(); saveBudgetsLS();
+  // rebuild category lists + wallet dropdowns now that real data is loaded
+  if(typeof refreshAfterLoad==='function') refreshAfterLoad();
   if(typeof goTab==='function') goTab(document.querySelector('.page.active')?.id?.replace('page-','')||'add');
 }
 

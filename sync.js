@@ -15,6 +15,7 @@ const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file'; // only files 
 let _gapiInited = false, _gisInited = false, _tokenClient = null;
 let _accessToken = null, _driveFileId = null;
 let syncEnabled = false, syncing = false, lastSyncTime = null;
+let _loadedFromDrive = false;   // becomes true only after a successful Drive load
 
 // ---- status indicator ----
 function setSyncStatus(state, detail){
@@ -121,7 +122,9 @@ function gatherAppData(){
 }
 
 // ---- apply loaded data back into the app ----
+let _applyingRemote = false;   // guard: don't treat a Drive load as a "local change"
 function applyAppData(d){
+  _applyingRemote = true;
   // PERSONAL CONFIG (accounts, loan, categories) — comes from Drive, not public code
   if(d.accounts && Object.keys(d.accounts).length){
     ACCOUNTS = d.accounts;
@@ -144,18 +147,66 @@ function applyAppData(d){
   localStorage.setItem('myfinance_cardbal_v2', JSON.stringify(cardBalances));
   localStorage.setItem('myfinance_wallet_override_v2', JSON.stringify(walletOverrides));
   saveNW(); saveBudgetsLS();
+  _applyingRemote = false;
+  _loadedFromDrive = true;     // safe to sync up from now on
   // rebuild category lists + wallet dropdowns now that real data is loaded
   if(typeof refreshAfterLoad==='function') refreshAfterLoad();
   if(typeof goTab==='function') goTab(document.querySelector('.page.active')?.id?.replace('page-','')||'add');
 }
 
 // ---- SAVE to Drive ----
-async function syncToDrive(){
+async function syncToDrive(force){
   if(!syncEnabled || syncing) return;
+
+  // ═══ SAFETY GUARD 1: never push an empty app over real data ═══
+  if(!force && (!txData || txData.length === 0)){
+    console.warn('sync blocked: local data is empty — refusing to overwrite Drive');
+    setSyncStatus('error','ไม่ push ข้อมูลว่าง');
+    return;
+  }
+  // ═══ SAFETY GUARD 2: don't push until we've loaded from Drive at least once ═══
+  if(!force && !_loadedFromDrive){
+    console.warn('sync blocked: have not loaded from Drive yet this session');
+    return;
+  }
+
   syncing = true; setSyncStatus('syncing');
   try{
+    // ═══ SAFETY GUARD 3: compare against what's in Drive before overwriting ═══
+    const existing = await findDriveFile();
+    if(existing && !force){
+      try{
+        const r = await fetch(`https://www.googleapis.com/drive/v3/files/${existing.id}?alt=media`,
+          {headers:{Authorization:`Bearer ${_accessToken}`}});
+        const remote = await r.json();
+        const remoteCount = (remote.tx||[]).length;
+        const localCount = txData.length;
+        // If Drive has a LOT more data than we do, something is wrong — stop and ask.
+        if(remoteCount > localCount + 5 && remoteCount > 0){
+          syncing = false;
+          const proceed = confirm(
+            '⚠️ หยุดไว้ก่อน! ข้อมูลใน Drive มีมากกว่าในเครื่องนี้\n\n'+
+            'ใน Drive: '+remoteCount+' รายการ\n'+
+            'ในเครื่องนี้: '+localCount+' รายการ\n\n'+
+            'ถ้ากด OK จะเขียนทับ Drive ด้วยข้อมูลที่น้อยกว่า (ข้อมูลอาจหาย)\n'+
+            'ถ้ากด Cancel จะโหลดข้อมูลจาก Drive มาแทน (แนะนำ)');
+          if(!proceed){ await loadFromDrive(false); return; }
+          syncing = true;
+        }
+      }catch(e){ /* if we can't read remote, fall through cautiously */ }
+    }
+
     const data = JSON.stringify(gatherAppData());
     await findDriveFile();
+    // keep a backup of the CURRENT good data before we overwrite it
+    if(_driveFileId){
+      try{
+        const rr = await fetch(`https://www.googleapis.com/drive/v3/files/${_driveFileId}?alt=media`,
+          {headers:{Authorization:`Bearer ${_accessToken}`}});
+        const prev = await rr.text();
+        if(prev && prev.length>100) await saveBackupCopy(prev);
+      }catch(e){ /* non-fatal */ }
+    }
     const metadata = {name:DRIVE_FILE_NAME, mimeType:'application/json'};
     const boundary='-------myfinance'+Date.now();
     const body =
@@ -189,27 +240,39 @@ async function loadFromDrive(isInitial){
   try{
     const file = await findDriveFile();
     if(!file){
-      // nothing in Drive yet — push current data up as the first copy
-      await syncToDrive();
+      // No file in Drive yet. Only create one if we actually have data to save.
+      if(txData && txData.length>0){
+        _loadedFromDrive = true;
+        await syncToDrive(true);   // first upload
+      }else{
+        setSyncStatus('ready');
+        console.log('Drive empty and app empty — nothing to sync yet. Import your data first.');
+      }
       return;
     }
     const resp = await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`,
       {headers:{Authorization:`Bearer ${_accessToken}`}});
     const remote = await resp.json();
-    // CONFLICT GUARD on initial load: if remote is newer, offer to use it
+    const remoteCount = (remote.tx||[]).length;
+    const localCount = (typeof txData!=='undefined' && txData) ? txData.length : 0;
+
     if(isInitial){
-      const remoteTime = new Date(remote.savedAt||0).getTime();
-      const localTime = parseInt(localStorage.getItem('myfinance_last_local_change')||'0');
-      if(remoteTime >= localTime){
-        applyAppData(remote);
-        setSyncStatus('synced','โหลดจาก Drive');
-      }else{
-        // local is newer — keep local, push it up
-        await syncToDrive();
+      // Drive is the source of truth on open.
+      // Only keep local instead if local genuinely has MORE data (a real unsynced edit).
+      if(localCount > remoteCount + 5 && remoteCount >= 0 && localCount > 0){
+        const keepLocal = confirm(
+          'ข้อมูลในเครื่องนี้มีมากกว่าใน Drive\n\n'+
+          'ในเครื่อง: '+localCount+' รายการ\n'+
+          'ใน Drive: '+remoteCount+' รายการ\n\n'+
+          'OK = ใช้ข้อมูลในเครื่อง (แล้ว sync ขึ้น Drive)\n'+
+          'Cancel = ใช้ข้อมูลจาก Drive (ทิ้งของในเครื่อง)');
+        if(keepLocal){ _loadedFromDrive = true; await syncToDrive(true); return; }
       }
+      applyAppData(remote);
+      setSyncStatus('synced','โหลดจาก Drive ('+remoteCount+' รายการ)');
     }else{
       applyAppData(remote);
-      setSyncStatus('synced','โหลดจาก Drive');
+      setSyncStatus('synced','โหลดจาก Drive ('+remoteCount+' รายการ)');
     }
   }catch(e){
     console.error('loadFromDrive error', e);
@@ -220,12 +283,58 @@ async function loadFromDrive(isInitial){
 // ---- hook: mark local change + trigger auto-sync (debounced) ----
 let _syncTimer = null;
 function markLocalChange(){
+  if(_applyingRemote) return;                 // a Drive load is not a user edit
   localStorage.setItem('myfinance_last_local_change', Date.now().toString());
   if(!syncEnabled) return;
+  if(!_loadedFromDrive) return;               // never sync up before we've loaded from Drive
+  if(!txData || txData.length===0) return;    // never sync up an empty app
   clearTimeout(_syncTimer);
-  _syncTimer = setTimeout(syncToDrive, 2500); // debounce: sync 2.5s after last change
+  _syncTimer = setTimeout(()=>syncToDrive(), 2500); // debounce: 2.5s after last change
 }
 
+
+
+// ---- BACKUP: keep a rolling previous version in Drive (safety net) ----
+const BACKUP_FILE_NAME = 'myfinance_data_backup.json';
+async function saveBackupCopy(dataStr){
+  try{
+    const resp = await gapi.client.drive.files.list({
+      q: `name='${BACKUP_FILE_NAME}' and trashed=false`, spaces:'drive', fields:'files(id)'
+    });
+    const existingId = (resp.result.files && resp.result.files[0]) ? resp.result.files[0].id : null;
+    const metadata = {name:BACKUP_FILE_NAME, mimeType:'application/json'};
+    const boundary='-------bk'+Date.now();
+    const body = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n`+
+      JSON.stringify(metadata)+`\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n`+
+      dataStr+`\r\n--${boundary}--`;
+    const url = existingId
+      ? `https://www.googleapis.com/upload/drive/v3/files/${existingId}?uploadType=multipart`
+      : `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart`;
+    await fetch(url,{method: existingId?'PATCH':'POST',
+      headers:{Authorization:`Bearer ${_accessToken}`,'Content-Type':`multipart/related; boundary=${boundary}`}, body});
+  }catch(e){ console.warn('backup copy failed', e); }
+}
+
+// ---- RESTORE: pull the backup copy if the main file got damaged ----
+async function restoreFromBackup(){
+  if(!syncEnabled){ alert('เชื่อม Drive ก่อน'); return; }
+  try{
+    const resp = await gapi.client.drive.files.list({
+      q: `name='${BACKUP_FILE_NAME}' and trashed=false`, spaces:'drive', fields:'files(id,modifiedTime)'
+    });
+    if(!resp.result.files || !resp.result.files.length){ alert('ไม่พบไฟล์สำรองใน Drive'); return; }
+    const f = resp.result.files[0];
+    const r = await fetch(`https://www.googleapis.com/drive/v3/files/${f.id}?alt=media`,
+      {headers:{Authorization:`Bearer ${_accessToken}`}});
+    const backup = await r.json();
+    const n = (backup.tx||[]).length;
+    if(confirm('พบไฟล์สำรอง: '+n+' รายการ (บันทึกเมื่อ '+(backup.savedAt||'?')+')\n\nกู้คืนข้อมูลนี้?')){
+      applyAppData(backup);
+      await syncToDrive(true);
+      alert('กู้คืนแล้ว: '+n+' รายการ');
+    }
+  }catch(e){ alert('กู้คืนไม่สำเร็จ: '+e.message); }
+}
 
 // ---- DIAGNOSTIC: tells you exactly what's blocking the sync ----
 function diagnoseSync(){

@@ -290,11 +290,21 @@ function saveTx(){
       txData.unshift({ d:date, c:'Debt payment', a:-amt, w:from, n:'จ่ายบิล '+debt.name+(note?' · '+note:''), ty:'debt', debt:target });
     } else {
       // loan: split principal/interest
-      const {r1,r2}=getRates();
-      const bal=getDebtBalance(target);
-      const period=LAST_ACTUAL.p+1;
-      const rate=period<=24?r1:r2;
-      const interest=bal*rate/12;
+      // MANUAL INTEREST: if you typed the exact interest from your bank statement, use it.
+      // Otherwise fall back to the rate-based estimate.
+      const manualEl = document.getElementById('f-interest');
+      const manualVal = manualEl ? parseFloat(manualEl.value) : NaN;
+      let interest;
+      if(!isNaN(manualVal) && manualVal>=0){
+        interest = manualVal;                    // exact figure from statement
+      }else{
+        const {r1,r2}=getRates();
+        const bal=getDebtBalance(target);
+        const period=LAST_ACTUAL.p+1;
+        const rate=period<=24?r1:r2;
+        interest = bal*rate/12;                  // estimate
+      }
+      if(interest > amt){ toast('ดอกเบี้ยมากกว่ายอดจ่าย'); return; }
       const principal=amt-interest;
       // interest = expense, principal = debt reduction
       txData.unshift({ d:date, c:'Loan interest', a:-interest, w:from, n:'ดอกเบี้ย '+debt.name, ty:'expense' });
@@ -303,6 +313,7 @@ function saveTx(){
     saveTxData();
     document.getElementById('f-amount').value='';
     document.getElementById('f-note').value='';
+    const _ie=document.getElementById('f-interest'); if(_ie) _ie.value='';
     toast('บันทึกการจ่ายหนี้แล้ว ✓');
     return;
   }
@@ -658,8 +669,44 @@ let DEBTS = (function(){  // derived from ACCOUNTS registry
   return out;
 })();
 
+// Default cut-point for the mortgage baseline (editable in the Debt tab)
+let MORTGAGE_BASE_DATE = localStorage.getItem('myfinance_mortgage_base_date') || '2026-06-01';
+function setMortgageBaseDate(d){
+  MORTGAGE_BASE_DATE = d;
+  localStorage.setItem('myfinance_mortgage_base_date', d);
+  accountsByType('mortgage').forEach(id=>{
+    if(!ACCOUNTS[id].baseline) ACCOUNTS[id].baseline = {};
+    ACCOUNTS[id].baseline.date = d;
+    if(typeof ACCOUNTS[id].baseline.amount!=='number') ACCOUNTS[id].baseline.amount = LAST_ACTUAL.balance;
+  });
+  if(typeof markLocalChange==='function') markLocalChange();
+  renderDebt(); renderNetWorth();
+}
+function setMortgageBaseAmount(amt){
+  const v = parseFloat(amt); if(isNaN(v)) return;
+  accountsByType('mortgage').forEach(id=>{
+    if(!ACCOUNTS[id].baseline) ACCOUNTS[id].baseline = {};
+    ACCOUNTS[id].baseline.amount = v;
+    if(!ACCOUNTS[id].baseline.date) ACCOUNTS[id].baseline.date = MORTGAGE_BASE_DATE;
+  });
+  if(typeof markLocalChange==='function') markLocalChange();
+  renderDebt(); renderNetWorth();
+}
+
 function getDebtBalance(debtId){
-  if(debtId==='House KTB') return LAST_ACTUAL.balance;
+  // ── MORTGAGE: dated-baseline model (same pattern as credit cards) ──
+  // balance = baseline balance − principal repaid AFTER the baseline date
+  if(accountType(debtId)==='mortgage'){
+    const acc = ACCOUNTS[debtId] || {};
+    const base = acc.baseline || {};
+    const baseAmount = (typeof base.amount==='number') ? base.amount : LAST_ACTUAL.balance;
+    const baseDate = base.date || MORTGAGE_BASE_DATE;
+    let principalPaid = 0;
+    txData.forEach(t=>{
+      if(t.ty==='debt' && t.debt===debtId && t.d > baseDate) principalPaid += Math.abs(t.a);
+    });
+    return Math.max(0, baseAmount - principalPaid);
+  }
   // Credit card dated-baseline model:
   // balance = baseline debt (read from bank app) + new charges AFTER baseline date - payments AFTER baseline date
   // Pre-baseline transactions stay as records but don't affect debt (already settled).
@@ -722,6 +769,15 @@ function renderDebt(){
   if(kb) kb.value=(ktcB&&typeof ktcB==='object')?ktcB.amount:(ktcB||0);
   const sd=document.getElementById('bal-scb-date'); if(sd) sd.value=(scbB&&typeof scbB==='object')?scbB.date:today();
   const kd=document.getElementById('bal-ktc-date'); if(kd) kd.value=(ktcB&&typeof ktcB==='object')?ktcB.date:today();
+  // mortgage baseline fields
+  const mId = accountsByType('mortgage')[0];
+  if(mId){
+    const mb = (ACCOUNTS[mId] && ACCOUNTS[mId].baseline) || {};
+    const hb=document.getElementById('bal-house');
+    if(hb) hb.value = (typeof mb.amount==='number') ? mb.amount : Math.round(LAST_ACTUAL.balance);
+    const hd=document.getElementById('bal-house-date');
+    if(hd) hd.value = mb.date || MORTGAGE_BASE_DATE;
+  }
 }
 function adjustCardBalance(card,val){
   const dateId = card==='Credit Card SCB' ? 'bal-scb-date' : 'bal-ktc-date';

@@ -212,14 +212,16 @@ function setType(type){
     const el=document.getElementById('tb-'+t);
     if(el) el.className = 'type-btn' + (t===type ? ' sel-'+t : '');
   });
-  document.getElementById('grp-amount').style.display = (type==='invest') ? 'none' : 'block';
+  // amount field: shown for expense/income/transfer/card-debt; hidden for invest (has own fields)
+  // for debt, updateDebtForm() decides (card=amount, loan=principal+interest)
+  document.getElementById('grp-amount').style.display = (type==='invest'||type==='debt') ? 'none' : 'block';
   document.getElementById('grp-category').style.display = (type==='expense'||type==='income') ? 'block' : 'none';
   document.getElementById('grp-wallet').style.display = (type==='expense'||type==='income') ? 'block' : 'none';
   document.getElementById('grp-transfer').style.display = (type==='transfer') ? 'block' : 'none';
   document.getElementById('grp-invest').style.display = (type==='invest') ? 'block' : 'none';
   document.getElementById('grp-debt').style.display = (type==='debt') ? 'block' : 'none';
   if(type==='expense'||type==='income') fillCategories();
-  if(type==='debt'){ updateDebtForm(); }
+  if(type==='debt'){ fillDebtTargets(); updateDebtForm(); }
 }
 
 // Refresh all UI lists after data/config loads from Drive
@@ -725,17 +727,19 @@ function updateDebtForm(){
   const bal=getDebtBalance(target);
   const info=document.getElementById('debt-split-info');
   const loanFields=document.getElementById('loan-fields');
-  const amtField=document.getElementById('f-amount') ? document.getElementById('f-amount').closest('.field') : null;
+  const amtGrp=document.getElementById('grp-amount');
 
-  if(debt && debt.type==='card'){
-    // credit card: single amount, no principal/interest split
+  if(!debt){ if(info) info.innerHTML=''; return; }
+
+  if(debt.type==='card'){
+    // credit card: single amount field, no principal/interest split
     if(loanFields) loanFields.style.display='none';
-    if(amtField) amtField.style.display='';
+    if(amtGrp) amtGrp.style.display='block';
     info.innerHTML=`<div class="debt-bal">ยอดค้างปัจจุบัน: <b>${fmt(bal)}</b></div><div class="debt-note">บัตรเครดิต = โอนล้างหนี้ทั้งหมด (ไม่มีดอกเบี้ยถ้าจ่ายเต็ม)</div>`;
   } else {
-    // loan (house): enter principal + interest separately; hide the single amount field
-    if(loanFields) loanFields.style.display='';
-    if(amtField) amtField.style.display='none';
+    // loan (house): principal + interest fields; hide the single amount field
+    if(loanFields) loanFields.style.display='block';
+    if(amtGrp) amtGrp.style.display='none';
     const principal=parseFloat(document.getElementById('f-principal').value)||0;
     const interest=parseFloat(document.getElementById('f-interest').value)||0;
     const total=principal+interest;

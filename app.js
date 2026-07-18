@@ -280,40 +280,30 @@ function saveTx(){
 
   // DEBT PAYMENT
   if(curType==='debt'){
-    const amt = parseFloat(document.getElementById('f-amount').value);
-    if(!amt||amt<=0){ toast('กรุณาใส่จำนวนเงิน'); return; }
     const target = document.getElementById('f-debt-target').value;
     const from = document.getElementById('f-debt-from').value;
     const debt = DEBTS.find(d=>d.id===target);
     if(debt.type==='card'){
-      // pure transfer: bank -> card (clears debt)
+      // credit card: single amount, pure transfer bank -> card (clears debt)
+      const amt = parseFloat(document.getElementById('f-amount').value);
+      if(!amt||amt<=0){ toast('กรุณาใส่จำนวนเงิน'); return; }
       txData.unshift({ d:date, c:'Debt payment', a:-amt, w:from, n:'จ่ายบิล '+debt.name+(note?' · '+note:''), ty:'debt', debt:target });
     } else {
-      // loan: split principal/interest
-      // MANUAL INTEREST: if you typed the exact interest from your bank statement, use it.
-      // Otherwise fall back to the rate-based estimate.
-      const manualEl = document.getElementById('f-interest');
-      const manualVal = manualEl ? parseFloat(manualEl.value) : NaN;
-      let interest;
-      if(!isNaN(manualVal) && manualVal>=0){
-        interest = manualVal;                    // exact figure from statement
-      }else{
-        const {r1,r2}=getRates();
-        const bal=getDebtBalance(target);
-        const period=LAST_ACTUAL.p+1;
-        const rate=period<=24?r1:r2;
-        interest = bal*rate/12;                  // estimate
-      }
-      if(interest > amt){ toast('ดอกเบี้ยมากกว่ายอดจ่าย'); return; }
-      const principal=amt-interest;
-      // interest = expense, principal = debt reduction
-      txData.unshift({ d:date, c:'Loan interest', a:-interest, w:from, n:'ดอกเบี้ย '+debt.name, ty:'expense' });
-      txData.unshift({ d:date, c:'Debt payment', a:-principal, w:from, n:'เงินต้น '+debt.name+(note?' · '+note:''), ty:'debt', debt:target });
+      // loan (house): principal + interest entered separately from the statement
+      const principal = parseFloat(document.getElementById('f-principal').value)||0;
+      const interest  = parseFloat(document.getElementById('f-interest').value)||0;
+      if(principal<=0 && interest<=0){ toast('กรุณาใส่เงินต้นและ/หรือดอกเบี้ย'); return; }
+      // interest = expense; principal = debt reduction. Tagged with prin/int for the Loan table.
+      if(interest>0)
+        txData.unshift({ d:date, c:'Loan interest', a:-interest, w:from, n:'ดอกเบี้ย '+debt.name, ty:'expense', debt:target, interest:interest });
+      if(principal>0)
+        txData.unshift({ d:date, c:'Debt payment', a:-principal, w:from, n:'เงินต้น '+debt.name+(note?' · '+note:''), ty:'debt', debt:target, principal:principal, interest:interest });
     }
     saveTxData();
-    document.getElementById('f-amount').value='';
+    const _a=document.getElementById('f-amount'); if(_a) _a.value='';
     document.getElementById('f-note').value='';
     const _ie=document.getElementById('f-interest'); if(_ie) _ie.value='';
+    const _pr=document.getElementById('f-principal'); if(_pr) _pr.value='';
     toast('บันทึกการจ่ายหนี้แล้ว ✓');
     return;
   }
@@ -734,15 +724,27 @@ function updateDebtForm(){
   const debt=DEBTS.find(d=>d.id===target);
   const bal=getDebtBalance(target);
   const info=document.getElementById('debt-split-info');
-  if(debt.type==='card'){
+  const loanFields=document.getElementById('loan-fields');
+  const amtField=document.getElementById('f-amount') ? document.getElementById('f-amount').closest('.field') : null;
+
+  if(debt && debt.type==='card'){
+    // credit card: single amount, no principal/interest split
+    if(loanFields) loanFields.style.display='none';
+    if(amtField) amtField.style.display='';
     info.innerHTML=`<div class="debt-bal">ยอดค้างปัจจุบัน: <b>${fmt(bal)}</b></div><div class="debt-note">บัตรเครดิต = โอนล้างหนี้ทั้งหมด (ไม่มีดอกเบี้ยถ้าจ่ายเต็ม)</div>`;
   } else {
-    const {r1,r2}=getRates();
-    const period=LAST_ACTUAL.p+1;
-    const rate=period<=24?r1:r2;
-    const amt=parseFloat(document.getElementById('f-amount').value)||0;
-    const monthInt=bal*rate/12;
-    info.innerHTML=`<div class="debt-bal">ยอดหนี้คงเหลือ: <b>${fmt(bal)}</b></div><div class="debt-note">งวดถัดไป (งวด ${period}) ดอกเบี้ย ${(rate*100).toFixed(2)}% → ดอกประมาณ ${fmt(monthInt)}/เดือน · ที่เหลือเป็นเงินต้น</div>`;
+    // loan (house): enter principal + interest separately; hide the single amount field
+    if(loanFields) loanFields.style.display='';
+    if(amtField) amtField.style.display='none';
+    const principal=parseFloat(document.getElementById('f-principal').value)||0;
+    const interest=parseFloat(document.getElementById('f-interest').value)||0;
+    const total=principal+interest;
+    const prev=document.getElementById('loan-total-preview');
+    if(prev) prev.textContent=fmt(total);
+    const newBal = bal - principal;
+    info.innerHTML=`<div class="debt-bal">ยอดหนี้คงเหลือ: <b>${fmt(bal)}</b></div>`+
+      (total>0?`<div class="debt-note">หลังจ่ายงวดนี้: เงินต้น ${fmt(principal)} → หนี้เหลือ <b>${fmt(newBal)}</b> · ดอกเบี้ย ${fmt(interest)} (บันทึกเป็นค่าใช้จ่าย)</div>`:
+      `<div class="debt-note">ใส่เงินต้นและดอกเบี้ยจากใบแจ้งหนี้</div>`);
   }
 }
 
@@ -989,20 +991,54 @@ function runSim(){
   renderAmort(sim.schedule);
 }
 
+// Pull your REAL logged house-loan payments (after the statement history),
+// pairing each principal payment with its interest (same date).
+function getLoggedLoanPayments(){
+  const mortgageIds = accountsByType('mortgage');
+  const baseDate = MORTGAGE_BASE_DATE;
+  // principal rows (ty='debt' with a mortgage debt id), after baseline date
+  const prinRows = txData.filter(t=> t.ty==='debt' && mortgageIds.includes(t.debt) && t.d > baseDate);
+  return prinRows.map(t=>{
+    const principal = t.principal || Math.abs(t.a);
+    // find the matching interest row (same date, Loan interest) if interest not tagged
+    let interest = t.interest || 0;
+    if(!interest){
+      const intRow = txData.find(x=> x.c==='Loan interest' && x.d===t.d && mortgageIds.includes(x.debt));
+      if(intRow) interest = Math.abs(intRow.a);
+    }
+    return { date:t.d, principal, interest };
+  }).sort((a,b)=> a.date < b.date ? -1 : 1);
+}
+
 function renderAmort(estSchedule){
   if(!estSchedule){
     const pay = parseFloat(document.getElementById('sim-payment').value) || 56300;
     estSchedule = simulateLoan(pay).schedule;
   }
   const fmt0 = n => Math.round(n).toLocaleString();
-  let rows = '<tr><th>งวด</th><th>ดอกเบี้ย%</th><th>เงินต้น</th><th>ดอกเบี้ย</th><th>ยอดชำระ</th><th>คงเหลือ</th></tr>';
+  let rows = '<tr><th>งวด</th><th>วันที่</th><th>ดอกเบี้ย%</th><th>เงินต้น</th><th>ดอกเบี้ย</th><th>ยอดชำระ</th><th>คงเหลือ</th></tr>';
+
+  // 1) statement history (the 17 periods from the bank) — kept as-is
+  let lastBal = 0, lastP = 0;
   for(const p of LOAN.actualPayments){
-    rows += `<tr class="actual"><td>${p.p}</td><td>${p.rate.toFixed(2)}%</td><td>${fmt0(p.principal)}</td><td>${fmt0(p.interest)}</td><td>${fmt0(p.total)}</td><td>${fmt0(p.balance)}</td></tr>`;
+    rows += `<tr class="actual"><td>${p.p}</td><td>-</td><td>${p.rate.toFixed(2)}%</td><td>${fmt0(p.principal)}</td><td>${fmt0(p.interest)}</td><td>${fmt0(p.total)}</td><td>${fmt0(p.balance)}</td></tr>`;
+    lastBal = p.balance; lastP = p.p;
   }
+
+  // 2) YOUR real logged payments after the statement — appended, table grows as you pay
+  const realPays = getLoggedLoanPayments();
+  for(const rp of realPays){
+    lastP += 1;
+    lastBal = lastBal - rp.principal;
+    const ratePct = rp.interest>0 && lastBal>0 ? (rp.interest*12/(lastBal+rp.principal)*100) : 0;
+    rows += `<tr class="actual" style="background:rgba(80,200,120,0.08)"><td>${lastP} ✓</td><td>${rp.date.slice(5)}</td><td>${ratePct?ratePct.toFixed(2)+'%':'-'}</td><td>${fmt0(rp.principal)}</td><td>${fmt0(rp.interest)}</td><td>${fmt0(rp.principal+rp.interest)}</td><td>${fmt0(lastBal)}</td></tr>`;
+  }
+
+  // 3) estimated future schedule (simulator projection)
   let prevRate = 2.50;
   for(const p of estSchedule){
     const rateChanged = p.rate !== prevRate;
-    rows += `<tr class="estimate ${rateChanged?'rate-change':''}"><td>${p.p}</td><td>${p.rate.toFixed(2)}%</td><td>${fmt0(p.principal)}</td><td>${fmt0(p.interest)}</td><td>${fmt0(p.total)}</td><td>${fmt0(p.balance)}</td></tr>`;
+    rows += `<tr class="estimate ${rateChanged?'rate-change':''}"><td>${p.p}</td><td>-</td><td>${p.rate.toFixed(2)}%</td><td>${fmt0(p.principal)}</td><td>${fmt0(p.interest)}</td><td>${fmt0(p.total)}</td><td>${fmt0(p.balance)}</td></tr>`;
     prevRate = p.rate;
   }
   document.getElementById('amort-table').innerHTML = rows;

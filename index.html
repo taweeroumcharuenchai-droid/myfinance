@@ -53,11 +53,24 @@
   <div id="grp-debt" style="display:none">
     <div class="field"><label>จ่ายหนี้รายการไหน</label><select id="f-debt-target" onchange="updateDebtForm()"></select></div>
     <div class="field"><label>จ่ายจากบัญชี</label><select id="f-debt-from"></select></div>
-    <div class="field" id="interest-field" style="display:none">
-      <label>ดอกเบี้ยงวดนี้ (บาท) — ใส่ตัวเลขจริงจากธนาคาร</label>
-      <input type="number" step="0.01" id="f-interest" placeholder="เว้นว่าง = คำนวณจากอัตราดอกเบี้ยให้อัตโนมัติ" />
-      <div class="help-text">ที่เหลือจะถูกบันทึกเป็นเงินต้น (ยอดจ่าย − ดอกเบี้ย = เงินต้น)</div>
+
+    <!-- LOAN: enter principal + interest separately (matches bank statement) -->
+    <div id="loan-fields" style="display:none">
+      <div class="field">
+        <label>เงินต้น (บาท) — จากใบแจ้งหนี้</label>
+        <input type="number" step="0.01" id="f-principal" placeholder="เช่น 102234.80" oninput="updateDebtForm()" />
+      </div>
+      <div class="field">
+        <label>ดอกเบี้ย (บาท) — จากใบแจ้งหนี้</label>
+        <input type="number" step="0.01" id="f-interest" placeholder="เช่น 17765.20" oninput="updateDebtForm()" />
+        <div class="help-text">ดอกเบี้ยบ้านคิดตามจำนวนวันจริง (28-31 วัน) ใส่ตัวเลขตรงจากธนาคารได้เลย</div>
+      </div>
+      <div class="field" style="background:var(--surface2);border-radius:8px;padding:8px 10px">
+        <span style="font-size:12px;color:var(--txt3)">ยอดจ่ายรวมงวดนี้: </span>
+        <span id="loan-total-preview" style="font-weight:700">฿0</span>
+      </div>
     </div>
+
     <div id="debt-split-info" class="debt-split"></div>
   </div>
 

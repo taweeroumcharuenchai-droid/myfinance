@@ -958,8 +958,9 @@ function getRates(){
 // Simulate from current balance forward
 function simulateLoan(monthlyPayment){
   const {r1,r2} = getRates();
-  let bal = LAST_ACTUAL.balance;
-  let period = LAST_ACTUAL.p + 1;
+  let bal = (typeof getHouseDebt==='function') ? getHouseDebt() : LAST_ACTUAL.balance;  // live balance
+  const logged = (typeof getLoggedLoanPayments==='function') ? getLoggedLoanPayments().length : 0;
+  let period = LAST_ACTUAL.p + logged + 1;
   let totalInterest = 0;
   const schedule = [];
   while(bal > 0.01 && period <= 360){
@@ -1051,7 +1052,7 @@ function renderAmort(estSchedule){
 function renderLoanVsInvest(){
   const {r2} = getRates();
   const loanRate = r2*100;
-  const balance = LAST_ACTUAL.balance;
+  const balance = (typeof getHouseDebt==='function') ? getHouseDebt() : LAST_ACTUAL.balance;
   const items = [
     {label:'ดอกเบี้ยหนี้คอนโด (หลังงวด 25)', val:loanRate.toFixed(1)+'%', desc:'ผลตอบแทน "การันตี" จากการโปะ', color:'var(--expense)'},
     {label:'Dividend yield หุ้นปัจจุบัน', val:'5-7%', desc:'มีความเสี่ยง แต่ได้ปันผลสม่ำเสมอ', color:'var(--transfer)'},
@@ -1068,11 +1069,18 @@ function renderLoanVsInvest(){
 
 function renderLoan(){
   if(!LOAN.actualPayments || !LOAN.actualPayments.length) return;  // no loan config yet (before Drive login)
-  document.getElementById('l-balance').textContent = fmt(LAST_ACTUAL.balance);
-  document.getElementById('l-progress').textContent = 'ลดเงินต้นแล้ว '+((LOAN.vongern-LAST_ACTUAL.balance)/LOAN.vongern*100).toFixed(1)+'%';
-  const totalPaid = LOAN.actualPayments.reduce((s,p)=>s+p.total,0);
-  const totalPrin = LOAN.actualPayments.reduce((s,p)=>s+p.principal,0);
-  const totalInt = LOAN.actualPayments.reduce((s,p)=>s+p.interest,0);
+  // Use the DYNAMIC balance (statement baseline − principal you've logged since),
+  // so this matches the Debt tab exactly. getHouseDebt() is the single source of truth.
+  const liveBalance = getHouseDebt();
+  document.getElementById('l-balance').textContent = fmt(liveBalance);
+  document.getElementById('l-progress').textContent = 'ลดเงินต้นแล้ว '+((LOAN.vongern-liveBalance)/LOAN.vongern*100).toFixed(1)+'%';
+  // "paid" = statement history + your logged real payments
+  const logged = getLoggedLoanPayments();
+  const loggedPrin = logged.reduce((s,p)=>s+p.principal,0);
+  const loggedInt = logged.reduce((s,p)=>s+p.interest,0);
+  const totalPaid = LOAN.actualPayments.reduce((s,p)=>s+p.total,0) + loggedPrin + loggedInt;
+  const totalPrin = LOAN.actualPayments.reduce((s,p)=>s+p.principal,0) + loggedPrin;
+  const totalInt = LOAN.actualPayments.reduce((s,p)=>s+p.interest,0) + loggedInt;
   document.getElementById('l-paid').textContent = fmt(totalPaid);
   document.getElementById('l-paidbreak').textContent = 'เงินต้น '+fmt(totalPrin)+' · ดอก '+fmt(totalInt);
   runSim();
@@ -1090,7 +1098,7 @@ function renderHealth(){
   // Total assets & liabilities — use SHARED NUMBERS (single source of truth)
   const portMkt = getPortfolioValue();
   const totalAssets = portMkt + liquid; // + condo value would add here
-  const totalLiab = LAST_ACTUAL.balance;
+  const totalLiab = getHouseDebt() + getCardDebt();  // dynamic house debt + cards
   const netWorth = totalAssets - totalLiab;
 
   const annualIncome = income*12;

@@ -202,6 +202,15 @@ function goTab(page){
   if(page==='health'){ renderHealth(); renderValidation(); }
   if(page==='debt') renderDebt();
   if(page==='networth'){ initDivYear(); renderNetWorth(); renderDividends(); }
+  if(page==='add'){
+    // self-heal: repopulate the entry dropdowns every time you open the add tab,
+    // so they're never left empty by sync timing. Cheap and safe.
+    if(typeof rebuildCategories==='function') rebuildCategories();
+    if(typeof rebuildDerived==='function') rebuildDerived();
+    if(typeof fillWallets==='function') fillWallets();
+    if(typeof fillCategories==='function') fillCategories();
+    if(typeof fillDebtTargets==='function') fillDebtTargets();
+  }
 }
 
 // ============ ADD FORM ============

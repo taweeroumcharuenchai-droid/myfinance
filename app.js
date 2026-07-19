@@ -327,7 +327,7 @@ function saveTx(){
     saveTxData();
 
     // update holdings
-    updateHolding(name, itype, region, ccy, units, price, action);
+    updateHolding(name, itype, region, ccy, units, price, action, date);
     // adjust cash in that wallet
     cashBalances[wallet] = (cashBalances[wallet]||0) + (action==='buy'?-thbTotal:thbTotal);
 
@@ -384,10 +384,11 @@ function saveTx(){
   buildNoteSuggestions();
 }
 
-function updateHolding(name, type, region, ccy, units, price, action){
+function updateHolding(name, type, region, ccy, units, price, action, txDate){
+  const today = txDate || document.getElementById('f-date').value || new Date().toISOString().slice(0,10);
   let h = holdings.find(x=>x.name===name && !x.lump);
   if(action==='sell'){
-    if(h){ h.units -= units; if(h.units<=0.0001) holdings = holdings.filter(x=>x!==h); saveHoldings(); }
+    if(h){ h.units -= units; h.asof = today; if(h.units<=0.0001) holdings = holdings.filter(x=>x!==h); saveHoldings(); }
     return;
   }
   if(h){
@@ -396,9 +397,10 @@ function updateHolding(name, type, region, ccy, units, price, action){
     h.units += units;
     h.avgCost = totalCost/h.units;
     if(!h.curPrice) h.curPrice = price;
+    h.asof = today;  // stamp: last updated from a logged transaction
   } else {
     const port = region==='Thailand' ? (type==='Stock'||type==='REIT'?'thai':'fund') : (type==='ETF'?'etf':type==='Mutual Fund'?'fund':'us');
-    holdings.push({ name, type, region, ccy, units, avgCost:price, curPrice:price, port });
+    holdings.push({ name, type, region, ccy, units, avgCost:price, curPrice:price, port, asof:today });
   }
   saveHoldings();
 }
@@ -555,8 +557,9 @@ function renderPort(){
     const {cost,val}=holdingValue(h);
     const g=val-cost, pct=cost>0?(g/cost*100).toFixed(1):'0';
     const priceDisplay = h.lump ? '—' : (h.curPrice||h.avgCost).toLocaleString(undefined,{maximumFractionDigits:2});
+    const asofTag = h.asof ? ` · <span style="color:var(--income)">อัพเดต ${h.asof.slice(5)}</span>` : '';
     return `<div class="holding">
-      <div class="h-name">${h.name}<div style="font-size:11px;color:var(--txt3);font-weight:400">${h.type} · ${h.region}${h.lump?'':' · '+h.units+' หน่วย'}</div></div>
+      <div class="h-name">${h.name}<div style="font-size:11px;color:var(--txt3);font-weight:400">${h.type} · ${h.region}${h.lump?'':' · '+h.units+' หน่วย'}${asofTag}</div></div>
       <div class="h-val">
         <div class="h-mkt">${fmt(val)}</div>
         <div class="h-pct ${g>=0?'pos':'neg'}">${g>=0?'+':''}${pct}%</div>
@@ -592,7 +595,7 @@ function editPrice(gi){
   const h=holdings[gi];
   const cur=h.curPrice||h.avgCost;
   const np=prompt(`ราคาปัจจุบันของ ${h.name} (${h.ccy}/หน่วย)\nต้นทุนเฉลี่ย: ${h.avgCost.toFixed(2)}`, cur);
-  if(np!==null){ const v=parseFloat(np); if(v>0){ h.curPrice=v; saveHoldings(); renderPort(); toast('อัปเดตราคาแล้ว ✓'); } }
+  if(np!==null){ const v=parseFloat(np); if(v>0){ h.curPrice=v; h.asof=new Date().toISOString().slice(0,10); saveHoldings(); renderPort(); toast('อัปเดตราคาแล้ว ✓'); } }
 }
 
 // ============ SYNC ============

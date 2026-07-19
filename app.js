@@ -235,6 +235,31 @@ function setType(type){
 
 // Refresh all UI lists after data/config loads from Drive
 function refreshAfterLoad(){
+  // SELF-HEAL: if META is empty (old-format data with no meta), rebuild it from transactions
+  if((!META.wallets || META.wallets.length===0) && txData.length>0){
+    META.wallets = [...new Set(txData.map(t=>t.w).filter(Boolean))].sort();
+    console.log('Rebuilt META.wallets from transactions:', META.wallets.length);
+  }
+  if((!META.cats || META.cats.length===0) && txData.length>0){
+    META.cats = [...new Set(txData.map(t=>t.c).filter(Boolean))].sort();
+    console.log('Rebuilt META.cats from transactions:', META.cats.length);
+  }
+  // SELF-HEAL: if ACCOUNTS registry empty, rebuild a basic one from wallets so types work
+  if((!ACCOUNTS || Object.keys(ACCOUNTS).length===0) && META.wallets.length>0){
+    ACCOUNTS = {};
+    META.wallets.forEach(w=>{
+      let type='bank';
+      if(/credit card|บัตรเครดิต/i.test(w)) type='credit_card';
+      else if(/ลงทุน|หุ้น|inovestx|innovestx|แม่ทองสุข/i.test(w)) type='investment';
+      else if(/กองทุน/i.test(w)) type='purchase_log';
+      ACCOUNTS[w] = {type};
+    });
+    // add ports to known investment wallets
+    if(ACCOUNTS['ลงทุนหุ้นไทย']) ACCOUNTS['ลงทุนหุ้นไทย'].ports=['thai'];
+    if(ACCOUNTS['หุ้นตปท IGLOBAL+Inovestx']) ACCOUNTS['หุ้นตปท IGLOBAL+Inovestx'].ports=['us','etf'];
+    if(ACCOUNTS['แม่ทองสุข']) ACCOUNTS['แม่ทองสุข'].ports=['gold'];
+    console.log('Rebuilt ACCOUNTS registry from wallets:', Object.keys(ACCOUNTS).length);
+  }
   rebuildCategories();
   if(typeof rebuildDerived==='function') rebuildDerived();
   if(typeof fillWallets==='function') fillWallets();

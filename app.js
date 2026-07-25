@@ -357,7 +357,10 @@ function saveTx(){
     const thbTotal = (ccy==='USD'?units*price*FX:units*price);
 
     // record transaction (shows in list, negative = money used to buy)
-    txData.unshift({ d:date, c:'Investment', a: action==='buy'?-thbTotal:thbTotal, w:wallet, n:(action==='buy'?'ซื้อ ':'ขาย ')+name+' '+units+'@'+price+(note?' · '+note:''), ty:'invest' });
+    // Store structured fields (invUnits/invName/invAction/invPrice) so delete/edit can reverse the holding.
+    txData.unshift({ d:date, c:'Investment', a: action==='buy'?-thbTotal:thbTotal, w:wallet,
+      n:(action==='buy'?'ซื้อ ':'ขาย ')+name+' '+units+'@'+price+(note?' · '+note:''), ty:'invest',
+      invName:name, invUnits:units, invPrice:price, invAction:action, invCcy:ccy, invType:itype, invRegion:region });
     saveTxData();
 
     // update holdings
@@ -477,7 +480,40 @@ function renderList(){
   }
   document.getElementById('tx-list').innerHTML=html;
 }
-function delTx(i){ if(confirm('ลบรายการนี้?')){ txData.splice(i,1); saveTxData(); renderList(); } }
+// Reverse the holding effect of an invest transaction (used when deleting/editing).
+// Parses structured fields if present, else falls back to the note "ซื้อ NAME UNITS@PRICE".
+function reverseInvestHolding(t){
+  if(t.ty!=='invest') return;
+  let name=t.invName, units=t.invUnits, price=t.invPrice, action=t.invAction;
+  if(units===undefined || !name){
+    // fallback: parse from note like "ซื้อ KTSTPLUS-A 1000@11.5"
+    const m = (t.n||'').match(/^(ซื้อ|ขาย)\s+(.+?)\s+([\d.]+)@([\d.]+)/);
+    if(m){ action = m[1]==='ซื้อ'?'buy':'sell'; name=m[2]; units=parseFloat(m[3]); price=parseFloat(m[4]); }
+  }
+  if(!name || !units) return;  // can't reverse safely
+  const h = holdings.find(x=>x.name===name && !x.lump);
+  if(!h) return;
+  if(action==='buy'){
+    // was added → subtract back
+    h.units -= units;
+    if(h.units<=0.0001) holdings = holdings.filter(x=>x!==h);
+  } else {
+    // was a sell (units removed) → add back
+    h.units += units;
+  }
+  saveHoldings();
+}
+
+function delTx(i){
+  if(!confirm('ลบรายการนี้?')) return;
+  const t = txData[i];
+  // if it's an investment, reverse its effect on holdings first
+  if(t && t.ty==='invest') reverseInvestHolding(t);
+  txData.splice(i,1);
+  saveTxData();
+  renderList();
+  if(typeof renderPort==='function') renderPort();
+}
 function editTx(i){
   const t=txData[i];
   const ty=txType(t);
@@ -592,12 +628,13 @@ function renderPort(){
     const g=val-cost, pct=cost>0?(g/cost*100).toFixed(1):'0';
     const priceDisplay = h.lump ? '—' : (h.curPrice||h.avgCost).toLocaleString(undefined,{maximumFractionDigits:2});
     const asofTag = h.asof ? ` · <span style="color:var(--income)">อัพเดต ${h.asof.slice(5)}</span>` : '';
+    const unitsTag = h.lump ? '' : ` · <span onclick="editHolding(${gi})" style="cursor:pointer;text-decoration:underline dotted">${h.units} หน่วย ✎</span>`;
     return `<div class="holding">
-      <div class="h-name">${h.name}<div style="font-size:11px;color:var(--txt3);font-weight:400">${h.type} · ${h.region}${h.lump?'':' · '+h.units+' หน่วย'}${asofTag}</div></div>
+      <div class="h-name">${h.name}<div style="font-size:11px;color:var(--txt3);font-weight:400">${h.type} · ${h.region}${unitsTag}${asofTag}</div></div>
       <div class="h-val">
         <div class="h-mkt">${fmt(val)}</div>
         <div class="h-pct ${g>=0?'pos':'neg'}">${g>=0?'+':''}${pct}%</div>
-        ${h.lump?'':`<div class="h-price" onclick="editPrice(${gi})">ราคา: ${priceDisplay} ✎</div>`}
+        ${h.lump?'':`<div class="h-price" onclick="editHolding(${gi})">แก้ไข ✎</div>`}
       </div>
     </div>`;
   }).join('') : '<div class="empty">ไม่มีรายการ</div>';
@@ -625,6 +662,57 @@ function renderAllocBars(obj,total){
   const colors=['#60a5fa','#a78bfa','#4ade80','#fbbf24','#f87171','#34d399','#f472b6'];
   return items.map(([k,v],i)=>`<div class="bar-row"><div class="bar-label">${k}</div><div class="bar-track"><div class="bar-fill" style="width:${v/total*100}%;background:${colors[i%colors.length]}"></div></div><div class="bar-val">${(v/total*100).toFixed(1)}%</div></div>`).join('');
 }
+// Full manual editor: correct units, average cost, and current NAV directly.
+// Lets you fix any drift from the broker without re-entering transactions.
+function editHolding(gi){
+  const h=holdings[gi];
+  if(!h || h.lump){ toast('รายการนี้แก้ตรงๆ ไม่ได้'); return; }
+  const curNav = h.curPrice||h.nav||h.avgCost;
+
+  const uStr = prompt(`📊 ${h.name}\n\n① จำนวนหน่วย (units)\nปัจจุบัน: ${h.units}\n\nใส่จำนวนหน่วยที่ถูกต้อง (จาก statement/แอปโบรกเกอร์):`, h.units);
+  if(uStr===null) return;  // cancelled
+  const units = parseFloat(uStr);
+  if(isNaN(units) || units<0){ toast('จำนวนหน่วยไม่ถูกต้อง'); return; }
+
+  const cStr = prompt(`② ต้นทุนเฉลี่ย/หน่วย (avg cost)\nปัจจุบัน: ${h.avgCost.toFixed(4)}\n\nเว้นว่าง = ใช้ค่าเดิม`, h.avgCost.toFixed(4));
+  if(cStr===null) return;
+  const avgCost = cStr.trim()==='' ? h.avgCost : parseFloat(cStr);
+  if(isNaN(avgCost) || avgCost<0){ toast('ต้นทุนไม่ถูกต้อง'); return; }
+
+  const nStr = prompt(`③ NAV/ราคาปัจจุบัน/หน่วย\nปัจจุบัน: ${curNav.toFixed(4)}\n\nเว้นว่าง = ใช้ค่าเดิม`, curNav.toFixed(4));
+  if(nStr===null) return;
+  const nav = nStr.trim()==='' ? curNav : parseFloat(nStr);
+  if(isNaN(nav) || nav<0){ toast('NAV ไม่ถูกต้อง'); return; }
+
+  // ④ date of this data (e.g. the statement date). Blank = today.
+  const todayStr = new Date().toISOString().slice(0,10);
+  const dStr = prompt(`④ วันที่ของข้อมูลนี้ (YYYY-MM-DD)\n\nเว้นว่าง = วันนี้ (${todayStr})\nหรือใส่วันที่ statement เช่น 2026-06-30`, todayStr);
+  if(dStr===null) return;
+  let asofDate = dStr.trim()==='' ? todayStr : dStr.trim();
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(asofDate)){ toast('รูปแบบวันที่ต้องเป็น YYYY-MM-DD'); return; }
+
+  // preview before applying
+  const oldVal = h.units*(h.curPrice||h.nav||h.avgCost)*(h.ccy==='USD'?FX:1);
+  const newVal = units*nav*(h.ccy==='USD'?FX:1);
+  if(!confirm(`ยืนยันแก้ ${h.name}:\n\nหน่วย: ${h.units} → ${units}\nต้นทุน: ${h.avgCost.toFixed(4)} → ${avgCost.toFixed(4)}\nNAV: ${curNav.toFixed(4)} → ${nav.toFixed(4)}\nวันที่ข้อมูล: ${asofDate}\n\nมูลค่า: ${fmt(oldVal)} → ${fmt(newVal)}`)) return;
+
+  if(units<=0.0001){
+    // zero units = position closed → remove it
+    holdings = holdings.filter(x=>x!==h);
+    toast('ปิดสถานะแล้ว (0 หน่วย) ✓');
+  } else {
+    h.units = units;
+    h.avgCost = avgCost;
+    h.curPrice = nav;
+    h.nav = nav;
+    h.asof = asofDate;
+    toast('แก้ไข holding แล้ว ✓');
+  }
+  saveHoldings();
+  renderPort();
+}
+
+// keep editPrice as a quick NAV-only shortcut (used elsewhere)
 function editPrice(gi){
   const h=holdings[gi];
   const cur=h.curPrice||h.avgCost;

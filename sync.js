@@ -106,8 +106,9 @@ async function findDriveFile(){
 
 // ---- gather all app data into one object ----
 function gatherAppData(){
-  return {
+  const data = {
     version: 2,
+    formatVersion: 'full-v2',   // marker: this file contains complete config
     savedAt: new Date().toISOString(),
     accounts: ACCOUNTS,          // personal config stays in Drive
     loan: LOAN,                  // personal config stays in Drive
@@ -119,26 +120,49 @@ function gatherAppData(){
     nw: {inputs: nwInputs, history: nwHistory},
     budgets: budgets,
   };
+  // self-documenting checklist — open the file and you can see what it contains
+  data._contains = {
+    accounts: !!(ACCOUNTS && Object.keys(ACCOUNTS).length),
+    loan: !!(LOAN && LOAN.actualPayments),
+    meta: !!(META.wallets && META.wallets.length),
+    tx: txData.length,
+    holdings: holdings.length,
+  };
+  return data;
 }
 
 // ---- apply loaded data back into the app ----
 let _applyingRemote = false;   // guard: don't treat a Drive load as a "local change"
 function applyAppData(d){
   _applyingRemote = true;
-  // PERSONAL CONFIG (accounts, loan, categories) — comes from Drive, not public code
+
+  // ═══ IMPORT GUARD + MERGE PROTECTION ═══
+  // Never let an incomplete file wipe existing config. If the incoming data is
+  // missing loan/meta/accounts but we already HAVE them, keep the existing ones.
+  const incomingMissing = [];
+  if(!d.accounts || !Object.keys(d.accounts).length) incomingMissing.push('accounts');
+  if(!d.loan || !d.loan.actualPayments) incomingMissing.push('loan');
+  if(!d.meta || !d.meta.wallets || !d.meta.wallets.length) incomingMissing.push('meta');
+  const haveExisting = (ACCOUNTS && Object.keys(ACCOUNTS).length>0) || (LOAN && LOAN.actualPayments) || (META.wallets && META.wallets.length>0);
+  if(incomingMissing.length>0 && haveExisting){
+    console.warn('Import guard: incoming data missing ['+incomingMissing.join(', ')+'] — keeping existing config (merge, not overwrite).');
+    if(typeof toast==='function') toast('ไฟล์ไม่มี '+incomingMissing.join('/')+' — เก็บ config เดิมไว้ ✓');
+  }
+
+  // PERSONAL CONFIG — only overwrite if the incoming file actually has it (else keep existing)
   if(d.accounts && Object.keys(d.accounts).length){
     ACCOUNTS = d.accounts;
     if(typeof rebuildDerived==='function') rebuildDerived();
   }
-  if(d.loan){ LOAN = d.loan; if(typeof rebuildDerived==='function') rebuildDerived(); }
+  if(d.loan && d.loan.actualPayments){ LOAN = d.loan; if(typeof rebuildDerived==='function') rebuildDerived(); }
   if(d.walletOverrides) walletOverrides = d.walletOverrides;
   if(d.meta){
-    if(d.meta.cats) META.cats = d.meta.cats;
-    if(d.meta.wallets) META.wallets = d.meta.wallets;
+    if(d.meta.cats && d.meta.cats.length) META.cats = d.meta.cats;
+    if(d.meta.wallets && d.meta.wallets.length) META.wallets = d.meta.wallets;
   }
   if(d.tx) txData = d.tx;
   if(d.holdings) holdings = d.holdings;
-  if(d.cardBalances) cardBalances = d.cardBalances;
+  if(d.cardBalances && Object.keys(d.cardBalances).length) cardBalances = d.cardBalances;
   if(d.walletOverrides) walletOverrides = d.walletOverrides;
   if(d.nw){ nwInputs = d.nw.inputs||nwInputs; nwHistory = d.nw.history||nwHistory; }
   if(d.budgets) budgets = d.budgets;

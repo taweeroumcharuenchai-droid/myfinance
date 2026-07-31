@@ -353,6 +353,13 @@
   <div id="ratios-list"></div>
 
   <div class="card">
+    <div class="card-title">🔍 ตรวจสุขภาพระบบเต็ม (System Health Check)</div>
+    <p class="help-text" style="margin-bottom:12px">ตรวจทุกอย่าง: ตัวเลขข้ามแท็บตรงกันไหม · กองซ้ำ/เพี้ยน · ข้อมูลครบ · sync · เป็นการตรวจอย่างเดียว ไม่แก้ข้อมูล ปลอดภัย 100%</p>
+    <button class="btn-primary" onclick="renderHealthCheck()" style="width:100%;margin-bottom:12px">🔍 เริ่มตรวจ</button>
+    <div id="health-check-result"></div>
+  </div>
+
+  <div class="card">
     <div class="card-title">ตรวจสอบความถูกต้องข้อมูล (Data Validation)</div>
     <p class="help-text" style="margin-bottom:12px">คำนวณตัวเลขสำคัญ 2 วิธีแล้วเทียบกัน — ถ้าตรง = ข้อมูลน่าเชื่อถือ ถ้าต่าง = อาจมีรายการตกหล่น</p>
     <div id="validation-list"></div>

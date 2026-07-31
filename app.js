@@ -742,13 +742,42 @@ function importFile(e){
     const txt=ev.target.result;
     if(file.name.endsWith('.json')){
       const obj=JSON.parse(txt);
-      if(obj.accounts && Object.keys(obj.accounts).length){ ACCOUNTS=obj.accounts; rebuildDerived(); }
-      if(obj.loan){ LOAN=obj.loan; rebuildDerived(); }
-      if(obj.meta){ if(obj.meta.cats) META.cats=obj.meta.cats; if(obj.meta.wallets) META.wallets=obj.meta.wallets; }
-      if(obj.tx){ txData=obj.tx; holdings=obj.holdings||holdings; cashBalances=obj.cash||{}; }
-      else if(Array.isArray(obj)){ txData=obj; }
-      refreshAfterLoad();
-      if(confirm('นำเข้าข้อมูลสำเร็จ? (แทนที่ของเดิม)')){ saveTxData(); saveHoldings(); toast('นำเข้าแล้ว ✓'); closeSync(); refreshAfterLoad(); renderList(); }
+
+      // ═══ LAYER 1: PRE-IMPORT COMPLETENESS CHECK ═══
+      // Tell the user exactly what the file contains BEFORE overwriting anything.
+      const has = {
+        accounts: !!(obj.accounts && Object.keys(obj.accounts).length),
+        loan: !!(obj.loan && obj.loan.actualPayments),
+        meta: !!(obj.meta && obj.meta.wallets && obj.meta.wallets.length),
+        tx: (obj.tx||obj).length||0,
+        holdings: (obj.holdings||[]).length||0,
+      };
+      const missing = [];
+      if(!has.accounts) missing.push('บัญชี (accounts)');
+      if(!has.loan) missing.push('สินเชื่อบ้าน (loan)');
+      if(!has.meta) missing.push('รายชื่อบัญชี/หมวด (meta)');
+
+      let msg = `📋 ไฟล์นี้มี:\n`;
+      msg += `• รายการ: ${has.tx}\n• กองทุน: ${has.holdings}\n`;
+      msg += `• บัญชี: ${has.accounts?'✓':'✗ ไม่มี'}\n• สินเชื่อบ้าน: ${has.loan?'✓':'✗ ไม่มี'}\n• หมวด/บัญชี: ${has.meta?'✓':'✗ ไม่มี'}\n\n`;
+      if(missing.length>0){
+        msg += `⚠️ ไฟล์นี้ไม่มี: ${missing.join(', ')}\n`;
+        msg += `แต่ไม่ต้องห่วง — ระบบจะเก็บ config เดิมไว้ให้ (ไม่ลบทิ้ง)\n\n`;
+      }
+      msg += `ยืนยันนำเข้า? (รายการ/กองทุนจะถูกแทนที่)`;
+      if(!confirm(msg)){ toast('ยกเลิกการนำเข้า'); e.target.value=''; return; }
+
+      // route through the PROTECTED applyAppData (has merge guard) — single safe path
+      if(typeof applyAppData==='function' && (obj.tx||obj.holdings||obj.accounts)){
+        // support bare-array (very old CSV-style) by wrapping
+        const payload = Array.isArray(obj) ? {tx:obj} : obj;
+        applyAppData(payload);
+        toast('นำเข้าแล้ว ✓ (config ปลอดภัย)');
+        closeSync(); renderList();
+      } else if(Array.isArray(obj)){
+        txData=obj; saveTxData(); refreshAfterLoad(); renderList(); toast('นำเข้าแล้ว ✓');
+        closeSync();
+      }
     } else {
       const imported=parseCSV(txt);
       if(confirm('นำเข้า '+imported.length+' รายการ?')){ txData=imported; saveTxData(); toast('นำเข้าแล้ว ✓'); closeSync(); initPeriodSelectors(); renderList(); }

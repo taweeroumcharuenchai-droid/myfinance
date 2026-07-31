@@ -729,7 +729,11 @@ function exportCSV(){
   download(csv,'myfinance_'+today()+'.csv','text/csv'); closeSync();
 }
 function exportJSON(){
-  download(JSON.stringify({tx:txData,holdings:holdings,cash:cashBalances}),'myfinance_backup_'+today()+'.json','application/json'); closeSync();
+  // Full backup — must include ALL config (loan/meta/accounts) so re-import never loses the loan tab, dropdowns, etc.
+  const full = (typeof gatherAppData==='function')
+    ? gatherAppData()
+    : {tx:txData, holdings:holdings, cash:cashBalances};
+  download(JSON.stringify(full),'myfinance_backup_'+today()+'.json','application/json'); closeSync();
 }
 function importFile(e){
   const file=e.target.files[0]; if(!file)return;
@@ -1778,6 +1782,133 @@ function scanDataHealth(){
   });
   return problems;
 }
+
+// ============ SYSTEM HEALTH CHECK (read-only self-test) ============
+// Computes each shared number TWO independent ways and compares them. Never modifies data.
+function runSystemHealthCheck(){
+  const R = [];
+  const near = (a,b,tol=1)=> Math.abs(a-b) < tol;
+  const money = n => fmt(Math.round(n));
+  const nw = computeNetWorth();
+
+  // CATEGORY 1: CROSS-TAB CONSISTENCY (independent recompute)
+  let portManual = 0; holdings.forEach(h=>{ portManual += holdingValue(h).val; });
+  if(near(getPortfolioValue(), nw.portVal) && near(getPortfolioValue(), portManual))
+    R.push({level:'pass', title:'พอร์ตลงทุน ตรงกันทุกแท็บ', detail:money(getPortfolioValue())});
+  else
+    R.push({level:'fail', title:'พอร์ตลงทุน ไม่ตรงกัน', detail:`getPortfolioValue=${money(getPortfolioValue())} · มั่งคั่ง=${money(nw.portVal)}`});
+
+  if(near(getInvestmentCash(), nw.investCash))
+    R.push({level:'pass', title:'เงินสดรอลงทุน ตรงกัน', detail:money(getInvestmentCash())});
+  else
+    R.push({level:'fail', title:'เงินสดรอลงทุน ไม่ตรงกัน', detail:`${money(getInvestmentCash())} vs ${money(nw.investCash)}`});
+
+  if(near(getHouseDebt(), nw.houseDebt))
+    R.push({level:'pass', title:'หนี้บ้าน ตรงกัน (หนี้สิน↔มั่งคั่ง↔สินเชื่อ)', detail:money(getHouseDebt())});
+  else
+    R.push({level:'fail', title:'หนี้บ้าน ไม่ตรงกัน', detail:`getHouseDebt=${money(getHouseDebt())} · มั่งคั่ง=${money(nw.houseDebt)}`});
+
+  let cardListSum = 0;
+  accountsByType('credit_card').forEach(c=>{ cardListSum += getDebtBalance(c); });
+  if(near(getCardDebt(), nw.cardDebt) && near(getCardDebt(), cardListSum))
+    R.push({level:'pass', title:'หนี้บัตรเครดิต ตรงกันทุกแท็บ', detail:money(getCardDebt())});
+  else
+    R.push({level:'fail', title:'หนี้บัตร ไม่ตรงกัน', detail:`getCardDebt=${money(getCardDebt())} · มั่งคั่ง=${money(nw.cardDebt)}`});
+
+  const liabSum = getHouseDebt() + getCardDebt();
+  if(near(liabSum, nw.liabilities))
+    R.push({level:'pass', title:'หนี้สินรวม ตรงกัน', detail:money(liabSum)});
+  else
+    R.push({level:'fail', title:'หนี้สินรวม ไม่ตรงกัน', detail:`${money(liabSum)} vs ${money(nw.liabilities)}`});
+
+  const assetsIndep = nw.portVal + nw.investCash + nw.cash + nw.condo;
+  const nwIndep = assetsIndep - (nw.houseDebt + nw.cardDebt);
+  if(near(getNetWorth(), nwIndep))
+    R.push({level:'pass', title:'Net worth คำนวณ 2 วิธี ตรงกัน', detail:money(getNetWorth())});
+  else
+    R.push({level:'fail', title:'Net worth ไม่ตรงกัน', detail:`getNetWorth=${money(getNetWorth())} · คำนวณเอง=${money(nwIndep)}`});
+
+  // CATEGORY 2: HOLDINGS INTEGRITY
+  const names = holdings.map(h=>h.name);
+  const dupNames = names.filter((n,i)=>names.indexOf(n)!==i);
+  if(dupNames.length===0) R.push({level:'pass', title:'ไม่มีกองซ้ำ', detail:holdings.length+' กอง'});
+  else R.push({level:'fail', title:'พบกองซ้ำ', detail:[...new Set(dupNames)].join(', ')+' → กดแก้ไข ลบตัวซ้ำ'});
+
+  const negUnits = holdings.filter(h=>h.units<0);
+  if(negUnits.length===0) R.push({level:'pass', title:'ไม่มี units ติดลบ', detail:''});
+  else R.push({level:'fail', title:'units ติดลบ', detail:negUnits.map(h=>h.name).join(', ')});
+
+  const nanHold = holdings.filter(h=>{ const v=holdingValue(h); return isNaN(v.val)||isNaN(v.cost); });
+  if(nanHold.length===0) R.push({level:'pass', title:'มูลค่า/ต้นทุน คำนวณได้ครบ', detail:''});
+  else R.push({level:'fail', title:'มูลค่าเป็น NaN', detail:nanHold.map(h=>h.name).join(', ')});
+
+  const noNav = holdings.filter(h=>!h.lump && !h.curPrice && !h.nav);
+  if(noNav.length===0) R.push({level:'pass', title:'ทุกกองมีราคา/NAV', detail:''});
+  else R.push({level:'warn', title:noNav.length+' กองไม่มี NAV (ใช้ต้นทุนแทน)', detail:noNav.slice(0,5).map(h=>h.name).join(', ')});
+
+  // CATEGORY 3: DATA COMPLETENESS
+  const badTx = scanDataHealth();
+  if(badTx.length===0) R.push({level:'pass', title:'รายการทั้งหมดถูกต้อง', detail:txData.length+' รายการ'});
+  else R.push({level:'fail', title:badTx.length+' รายการมีปัญหา', detail:'ดูแท็บสุขภาพ → ตรวจสอบข้อมูล'});
+
+  const knownWallets = new Set(META.wallets||[]);
+  const unknownW = [...new Set(txData.map(t=>t.w).filter(w=>w && !knownWallets.has(w)))];
+  if(unknownW.length===0) R.push({level:'pass', title:'บัญชีในรายการรู้จักครบ', detail:''});
+  else R.push({level:'warn', title:unknownW.length+' บัญชีไม่อยู่ในรายการ', detail:unknownW.slice(0,5).join(', ')});
+
+  // CATEGORY 4: CONFIG PRESENT
+  const cfg = [];
+  if(!META.wallets || META.wallets.length===0) cfg.push('META.wallets');
+  if(!META.cats || META.cats.length===0) cfg.push('META.cats');
+  if(!ACCOUNTS || Object.keys(ACCOUNTS).length===0) cfg.push('ACCOUNTS');
+  if(!LOAN || !LOAN.actualPayments) cfg.push('LOAN');
+  if(cfg.length===0) R.push({level:'pass', title:'Config ครบ (บัญชี/หมวด/สินเชื่อ)', detail:''});
+  else R.push({level:'fail', title:'Config ขาด', detail:cfg.join(', ')+' → import ไฟล์ข้อมูลที่สมบูรณ์'});
+
+  // CATEGORY 5: NUMBERS SANE
+  const negBanks = (META.wallets||[]).filter(w=>{
+    if(accountType(w)!=='bank') return false;
+    const b = walletBalance(w);
+    return b!==null && b < -1000;
+  });
+  if(negBanks.length===0) R.push({level:'pass', title:'ไม่มีบัญชีธนาคารติดลบผิดปกติ', detail:''});
+  else R.push({level:'warn', title:negBanks.length+' บัญชีธนาคารติดลบ', detail:negBanks.join(', ')+' (อาจต้องตั้งยอดจริง)'});
+
+  // CATEGORY 6: SYNC HEALTH
+  if(typeof driveConnected!=='undefined' && driveConnected)
+    R.push({level:'pass', title:'เชื่อม Google Drive แล้ว', detail:''});
+  else
+    R.push({level:'warn', title:'ยังไม่เชื่อม Drive', detail:'ข้อมูลเก็บในเครื่องเท่านั้น'});
+
+  // CATEGORY 7: ASOF COVERAGE
+  const noAsof = holdings.filter(h=>!h.lump && !h.asof);
+  if(noAsof.length===0) R.push({level:'pass', title:'ทุกกองมีวันที่อัพเดต', detail:''});
+  else R.push({level:'warn', title:noAsof.length+' กองยังไม่มีวันที่อัพเดต', detail:'อาจเป็นข้อมูลเก่า — แก้ไขเพื่อ stamp วันที่'});
+
+  return R;
+}
+
+function renderHealthCheck(){
+  const R = runSystemHealthCheck();
+  const pass = R.filter(r=>r.level==='pass').length;
+  const warn = R.filter(r=>r.level==='warn').length;
+  const fail = R.filter(r=>r.level==='fail').length;
+  const icon = {pass:'✅', warn:'⚠️', fail:'❌'};
+  const color = {pass:'var(--income)', warn:'#e0a800', fail:'var(--expense)'};
+  let html = `<div style="display:flex;gap:14px;margin-bottom:14px;font-weight:700">
+    <span style="color:var(--income)">✅ ผ่าน ${pass}</span>
+    <span style="color:#e0a800">⚠️ เตือน ${warn}</span>
+    <span style="color:var(--expense)">❌ ปัญหา ${fail}</span></div>`;
+  const order = {fail:0, warn:1, pass:2};
+  R.sort((a,b)=>order[a.level]-order[b.level]);
+  html += R.map(r=>`<div style="padding:8px 10px;margin-bottom:6px;border-radius:8px;background:var(--surface2);border-left:3px solid ${color[r.level]}">
+    <div style="font-weight:600">${icon[r.level]} ${r.title}</div>
+    ${r.detail?`<div style="font-size:12px;color:var(--txt3);margin-top:2px">${r.detail}</div>`:''}
+  </div>`).join('');
+  const box = document.getElementById('health-check-result');
+  if(box) box.innerHTML = html;
+}
+
 
 // ============ INIT ============
 loadData();

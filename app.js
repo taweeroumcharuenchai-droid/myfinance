@@ -215,6 +215,25 @@ function goTab(page){
 
 // ============ ADD FORM ============
 let curType = 'expense';
+// Copy the most recent expense/income transaction into the form for quick re-entry.
+// Pre-fills type, category, wallet, note — leaves amount blank so you just type the new amount.
+function duplicateLast(){
+  // find latest simple expense/income (skip invest/debt/transfer — they use special forms)
+  const last = txData.find(t=> t.ty==='expense' || t.ty==='income');
+  if(!last){ toast('ยังไม่มีรายการให้ก็อป'); return; }
+  goTab('add');
+  setType(last.ty);
+  fillCategories();
+  const catEl=document.getElementById('f-category'); if(catEl && last.c) catEl.value=last.c;
+  const walEl=document.getElementById('f-wallet'); if(walEl && last.w) walEl.value=last.w;
+  document.getElementById('f-note').value = last.n || '';
+  document.getElementById('f-date').value = today();   // default to today, not the old date
+  document.getElementById('f-amount').value = '';       // blank — you type the new amount
+  document.getElementById('edit-index').value = -1;     // ensure it's a NEW record, not an edit
+  toast('ก็อปแล้ว — ใส่จำนวนเงินแล้วบันทึก ✓');
+  const amt=document.getElementById('f-amount'); if(amt && amt.focus) amt.focus();
+}
+
 function setType(type){
   curType = type;
   ['expense','income','transfer','invest','debt'].forEach(t=>{

@@ -1,4 +1,3 @@
-
 :root{
   --bg:#0f1115; --surface:#1a1d24; --surface2:#222631; --border:#2c3140;
   --txt:#e8eaed; --txt2:#9aa0ab; --txt3:#6b7280;
@@ -197,3 +196,6 @@ html,body{font-size:17px}
 .swb-card{display:flex;justify-content:space-between;align-items:center;background:var(--surface2);border-radius:10px;padding:12px 14px;margin-bottom:6px}
 .swb-edit{background:var(--invest);color:#0a0d12;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:700;flex-shrink:0}
 .nw-delta{font-size:14px;font-weight:600;margin-top:4px}
+.btn-ghost{background:var(--surface2);color:var(--txt2);border:1px solid var(--border,#2a2f3a);border-radius:10px;cursor:pointer;transition:background .15s}
+.btn-ghost:hover{background:var(--surface3,#2a2f3a)}
+.btn-primary{background:var(--income);color:#0a0d12;border:none;border-radius:10px;font-weight:700;cursor:pointer;padding:10px}

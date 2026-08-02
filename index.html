@@ -18,7 +18,21 @@
 </div>
 
 <!-- ==================== PAGE: ADD ==================== -->
-<div class="page active" id="page-add">
+<!-- ==================== PAGE: DASHBOARD (หน้าหลัก) ==================== -->
+<div class="page active" id="page-home">
+  <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+    <select id="dash-month" onchange="renderDashboard()" style="flex:1;min-width:120px"></select>
+    <select id="dash-type" onchange="renderDashboard()" style="flex:1;min-width:120px">
+      <option value="all">ทั้งหมด</option>
+      <option value="income">รายรับ</option>
+      <option value="expense">รายจ่าย</option>
+    </select>
+  </div>
+  <div id="dash-cards"></div>
+  <div id="dash-detail"></div>
+</div>
+
+<div class="page" id="page-add">
   <div class="type-toggle">
     <button class="type-btn sel-expense" id="tb-expense" onclick="setType('expense')">รายจ่าย</button>
     <button class="type-btn" id="tb-income" onclick="setType('income')">รายได้</button>
@@ -373,7 +387,8 @@
 
 <!-- ==================== TABBAR ==================== -->
 <div class="tabbar">
-  <button class="tab active" data-page="add" onclick="goTab('add')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>เพิ่ม</button>
+  <button class="tab active" data-page="home" onclick="goTab('home')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 12l9-9 9 9M5 10v10h5v-6h4v6h5V10"/></svg>หน้าหลัก</button>
+  <button class="tab" data-page="add" onclick="goTab('add')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>เพิ่ม</button>
   <button class="tab" data-page="list" onclick="goTab('list')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>รายการ</button>
   <button class="tab" data-page="analysis" onclick="goTab('analysis')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 3v18h18M18 17V9M13 17V5M8 17v-3"/></svg>วิเคราะห์</button>
   <button class="tab" data-page="networth" onclick="goTab('networth')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2a10 10 0 1 0 10 10M12 2v10l8.5-5"/></svg>มั่งคั่ง</button>

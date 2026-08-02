@@ -359,6 +359,11 @@ function refreshAfterLoad(){
   if(typeof fillCategories==='function') fillCategories();
   if(typeof initPeriodSelectors==='function') initPeriodSelectors();
   if(typeof initDivYear==='function') initDivYear();
+  // refresh dashboard with the freshly-loaded data (rebuild month list too)
+  if(typeof renderDashboard==='function'){
+    const dm=document.getElementById('dash-month'); if(dm) dm.innerHTML='';  // force month list rebuild
+    renderDashboard();
+  }
 }
 
 function fillCategories(){
@@ -2041,4 +2046,4 @@ fillCategories();
 document.getElementById('f-date').value=today();
 initPeriodSelectors();
 setType('expense');
-try{ renderLoan(); renderHealth(); renderDebt(); initDivYear(); }catch(e){console.log(e);}
+try{ renderDashboard(); renderLoan(); renderHealth(); renderDebt(); initDivYear(); }catch(e){console.log(e);}

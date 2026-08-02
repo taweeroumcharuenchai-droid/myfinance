@@ -176,6 +176,79 @@ function getCardDebt(){
 // 5) Net worth = assets − liabilities (uses computeNetWorth for the full breakdown)
 function getNetWorth(){ return computeNetWorth().networth; }
 // 6) Income / expense totals for a period (year 'YYYY', month 0-11 or 'all')
+// ============ DASHBOARD (หน้าหลัก) ============
+function initDashMonth(){
+  const sel=document.getElementById('dash-month'); if(!sel) return;
+  if(sel.innerHTML && sel.innerHTML.indexOf('option')>=0) return; // already filled
+  const now=new Date();
+  const months=['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+  const years=[...new Set(txData.map(t=>t.d.slice(0,4)))].sort().reverse();
+  const yr = years[0] || String(now.getFullYear());
+  let opts=`<option value="${yr}|all">ทั้งปี ${yr}</option>`;
+  for(let m=11;m>=0;m--){ opts += `<option value="${yr}|${m}"${m===now.getMonth()?' selected':''}>${months[m]} ${yr}</option>`; }
+  years.slice(1).forEach(y=>{ opts += `<option value="${y}|all">ทั้งปี ${y}</option>`; });
+  sel.innerHTML=opts;
+}
+
+function renderDashboard(){
+  initDashMonth();
+  const sel=document.getElementById('dash-month');
+  const [yr, moRaw] = (sel && sel.value ? sel.value : (new Date().getFullYear()+'|'+new Date().getMonth())).split('|');
+  const mo = moRaw==='all' ? 'all' : parseInt(moRaw);
+  const typeFilter = document.getElementById('dash-type')?.value || 'all';
+
+  const pt = getPeriodTotals(yr, mo);
+  const netWorth = getNetWorth();
+
+  let budgetPlanned=0;
+  if(typeof budgets==='object' && budgets){
+    Object.keys(budgets).forEach(cat=>{
+      const moKey = mo==='all' ? null : (yr+'-'+String(mo+1).padStart(2,'0'));
+      const planned = (typeof budgets[cat]==='object') ? (budgets[cat][moKey]||budgets[cat].default||0) : (budgets[cat]||0);
+      budgetPlanned += planned;
+    });
+  }
+  const budgetLeft = budgetPlanned - pt.expense;
+
+  const card = (label,val,color,sub)=>`<div class="dash-card" style="border-left:3px solid ${color}">
+    <div class="dc-label">${label}</div>
+    <div class="dc-val" style="color:${color}">${fmt(val)}</div>
+    ${sub?`<div class="dc-sub">${sub}</div>`:''}</div>`;
+
+  let cards='<div class="dash-grid">';
+  cards += card('Net Worth', netWorth, 'var(--income)', 'มูลค่าสุทธิปัจจุบัน');
+  if(typeFilter!=='expense') cards += card('รายรับ', pt.income, 'var(--income)', 'ช่วงที่เลือก');
+  if(typeFilter!=='income')  cards += card('รายจ่าย', pt.expense, 'var(--expense)', 'ช่วงที่เลือก');
+  if(typeFilter==='all')     cards += card('คงเหลือสุทธิ', pt.net, pt.net>=0?'var(--income)':'var(--expense)', 'รายรับ − รายจ่าย');
+  if(budgetPlanned>0 && typeFilter!=='income') cards += card('คงเหลือในงบ', budgetLeft, budgetLeft>=0?'var(--income)':'var(--expense)', 'งบ '+fmt(budgetPlanned));
+  cards += '</div>';
+  const cardsBox=document.getElementById('dash-cards'); if(cardsBox) cardsBox.innerHTML = cards;
+
+  let detail='';
+  if(typeFilter!=='income'){
+    const catTotals={};
+    txData.forEach(t=>{
+      if(t.d.slice(0,4)!==yr) return;
+      if(mo!=='all' && new Date(t.d).getMonth()!==mo) return;
+      if(txType(t)!=='expense' || t.a>=0) return;
+      catTotals[t.c]=(catTotals[t.c]||0)+Math.abs(t.a);
+    });
+    const sorted=Object.entries(catTotals).sort((a,b)=>b[1]-a[1]).slice(0,6);
+    if(sorted.length){
+      const max=sorted[0][1];
+      detail += '<div class="card"><div class="card-title">รายจ่ายสูงสุด (ช่วงที่เลือก)</div>';
+      sorted.forEach(([c,v])=>{
+        detail += `<div style="margin-bottom:8px">
+          <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px"><span>${c}</span><span style="font-weight:600">${fmt(v)}</span></div>
+          <div style="height:6px;background:var(--surface2);border-radius:3px"><div style="height:100%;width:${(v/max*100).toFixed(0)}%;background:var(--expense);border-radius:3px"></div></div>
+        </div>`;
+      });
+      detail += '</div>';
+    }
+  }
+  const detailBox=document.getElementById('dash-detail'); if(detailBox) detailBox.innerHTML = detail;
+}
+
 function getPeriodTotals(yr, mo){
   let income=0, expense=0;
   txData.forEach(t=>{
@@ -195,6 +268,7 @@ function goTab(page){
   document.getElementById('page-'+page).classList.add('active');
   document.querySelector('.tab[data-page="'+page+'"]').classList.add('active');
   window.scrollTo(0,0);
+  if(page==='home') renderDashboard();
   if(page==='list') renderList();
   if(page==='analysis') renderAnalysis();
   if(page==='port') renderPort();

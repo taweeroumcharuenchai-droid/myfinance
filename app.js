@@ -1,3 +1,4 @@
+
 /* ═══════════════════════════════════════════════════════════════════════
    เงินของฉัน — Personal Finance App  (single-file, offline, localStorage)
    ───────────────────────────────────────────────────────────────────────
@@ -199,6 +200,7 @@ function renderDashboard(){
 
   const pt = getPeriodTotals(yr, mo);
   const netWorth = getNetWorth();
+  if(typeof autoSnapshotNW==='function') autoSnapshotNW(netWorth);  // record monthly net worth even from dashboard
 
   let budgetPlanned=0;
   if(typeof budgets==='object' && budgets){
@@ -754,6 +756,31 @@ function renderPort(){
     const g=o.v-o.c,pct=(g/o.c*100).toFixed(1);
     return `<div class="holding"><div class="h-name">${PORT_LABELS[k]||k}</div><div class="h-val"><div class="h-mkt ${g>=0?'pos':'neg'}">${g>=0?'+':''}${fmt(g)}</div><div class="h-pct ${g>=0?'pos':'neg'}">${g>=0?'+':''}${pct}%</div></div></div>`;
   }).join('');
+
+  renderAllocChart();
+}
+
+let allocChart=null;
+function renderAllocChart(){
+  const cv=document.getElementById('allocChart'); if(!cv || typeof Chart==='undefined') return;
+  // group by port type (thai/us/etf/fund/gold) — readable, not 65 slices
+  const byPort={};
+  holdings.forEach(h=>{ const v=holdingValue(h).val; byPort[h.port]=(byPort[h.port]||0)+v; });
+  const entries=Object.entries(byPort).filter(([k,v])=>v>0).sort((a,b)=>b[1]-a[1]);
+  if(entries.length===0){ if(cv.parentElement) cv.parentElement.innerHTML='<div class="empty">ยังไม่มีข้อมูลพอร์ต</div>'; return; }
+  const total=entries.reduce((s,[k,v])=>s+v,0);
+  const labels=entries.map(([k,v])=>(PORT_LABELS[k]||k)+' '+(v/total*100).toFixed(0)+'%');
+  const colors=['#4ade80','#60a5fa','#f472b6','#fbbf24','#a78bfa','#22d3ee','#fb923c','#94a3b8'];
+  if(allocChart) allocChart.destroy();
+  allocChart=new Chart(cv,{
+    type:'doughnut',
+    data:{labels, datasets:[{data:entries.map(([k,v])=>Math.round(v)), backgroundColor:colors, borderWidth:0}]},
+    options:{responsive:true, maintainAspectRatio:false, cutout:'62%',
+      plugins:{
+        legend:{position:'bottom', labels:{color:'#9ca3af', font:{size:11}, padding:10, boxWidth:12}},
+        tooltip:{callbacks:{label:(c)=>fmt(c.parsed)+' ('+(c.parsed/total*100).toFixed(1)+'%)'}}
+      }}
+  });
 }
 function renderAllocBars(obj,total){
   const items=Object.entries(obj).sort((a,b)=>b[1]-a[1]);
@@ -1187,7 +1214,13 @@ function renderNWChart(){
   const cv=document.getElementById('nwChart');
   if(!cv) return;
   if(nwHistory.length===0){
-    cv.parentElement.innerHTML='<div class="empty">ยังไม่มีประวัติ<br><span style="font-size:11px">กดปุ่ม "บันทึก snapshot" เพื่อเริ่มเก็บแนวโน้มความมั่งคั่งรายเดือน</span></div>';
+    cv.parentElement.innerHTML='<div class="empty">ยังไม่มีประวัติ<br><span style="font-size:11px">เปิดแอปทุกเดือน ระบบจะเก็บ net worth ให้อัตโนมัติ กราฟจะค่อยๆ ขึ้น</span></div>';
+    return;
+  }
+  if(nwHistory.length===1){
+    // one data point — chart would be just a dot; show a helpful note alongside it
+    const only=nwHistory[0];
+    cv.parentElement.innerHTML='<div class="empty" style="padding:20px 12px">📊 เก็บข้อมูลเดือนแรกแล้ว: <b>'+fmt(only.networth)+'</b><br><span style="font-size:11px">กราฟแนวโน้มจะแสดงเมื่อมีข้อมูล 2 เดือนขึ้นไป — เปิดแอปเดือนหน้าเพื่อเพิ่มจุดข้อมูล</span></div>';
     return;
   }
   if(nwChart)nwChart.destroy();
@@ -2047,3 +2080,4 @@ document.getElementById('f-date').value=today();
 initPeriodSelectors();
 setType('expense');
 try{ renderDashboard(); renderLoan(); renderHealth(); renderDebt(); initDivYear(); }catch(e){console.log(e);}
+

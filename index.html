@@ -29,6 +29,23 @@
     </select>
   </div>
   <div id="dash-cards"></div>
+
+  <div id="dash-expense-charts">
+    <div class="card" id="dash-exp-card" style="display:none">
+      <div class="card-title">รายจ่ายตามหมวด</div>
+      <div style="height:200px;position:relative;margin-bottom:8px"><canvas id="dashExpDoughnut"></canvas></div>
+      <div id="dashExpBars"></div>
+    </div>
+  </div>
+
+  <div id="dash-income-charts">
+    <div class="card" id="dash-inc-card" style="display:none">
+      <div class="card-title">รายรับตามหมวด</div>
+      <div style="height:200px;position:relative;margin-bottom:8px"><canvas id="dashIncDoughnut"></canvas></div>
+      <div id="dashIncBars"></div>
+    </div>
+  </div>
+
   <div id="dash-detail"></div>
 </div>
 
@@ -173,6 +190,11 @@
   <div class="mgrid">
     <div class="metric"><div class="ml">มูลค่าพอร์ตรวม</div><div class="mv" id="p-total">฿0</div><div class="ms" id="p-cost"></div></div>
     <div class="metric"><div class="ml">กำไร/ขาดทุน</div><div class="mv" id="p-gain">฿0</div><div class="ms" id="p-gainpct"></div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">สัดส่วนพอร์ต (Allocation)</div>
+    <div class="chart-wrap" style="position:relative"><canvas id="allocChart"></canvas></div>
   </div>
 
   <div class="card">

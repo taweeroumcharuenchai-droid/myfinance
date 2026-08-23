@@ -1,4 +1,3 @@
-
 /* ═══════════════════════════════════════════════════════════════════════
    เงินของฉัน — Personal Finance App  (single-file, offline, localStorage)
    ───────────────────────────────────────────────────────────────────────
@@ -226,29 +225,81 @@ function renderDashboard(){
   cards += '</div>';
   const cardsBox=document.getElementById('dash-cards'); if(cardsBox) cardsBox.innerHTML = cards;
 
-  let detail='';
-  if(typeFilter!=='income'){
-    const catTotals={};
-    txData.forEach(t=>{
-      if(t.d.slice(0,4)!==yr) return;
-      if(mo!=='all' && new Date(t.d).getMonth()!==mo) return;
-      if(txType(t)!=='expense' || t.a>=0) return;
-      catTotals[t.c]=(catTotals[t.c]||0)+Math.abs(t.a);
-    });
-    const sorted=Object.entries(catTotals).sort((a,b)=>b[1]-a[1]).slice(0,6);
-    if(sorted.length){
-      const max=sorted[0][1];
-      detail += '<div class="card"><div class="card-title">รายจ่ายสูงสุด (ช่วงที่เลือก)</div>';
-      sorted.forEach(([c,v])=>{
-        detail += `<div style="margin-bottom:8px">
-          <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px"><span>${c}</span><span style="font-weight:600">${fmt(v)}</span></div>
-          <div style="height:6px;background:var(--surface2);border-radius:3px"><div style="height:100%;width:${(v/max*100).toFixed(0)}%;background:var(--expense);border-radius:3px"></div></div>
-        </div>`;
-      });
-      detail += '</div>';
-    }
+  // category charts (doughnut + bars) for expense and income, respecting the type filter
+  renderCatCharts(yr, mo, typeFilter);
+  const detailBox=document.getElementById('dash-detail'); if(detailBox) detailBox.innerHTML = '';
+}
+
+// compute category totals for a period + kind ('expense'|'income')
+function catTotalsFor(yr, mo, kind){
+  const totals={};
+  txData.forEach(t=>{
+    if(t.d.slice(0,4)!==yr) return;
+    if(mo!=='all' && new Date(t.d).getMonth()!==mo) return;
+    if(txType(t)!==kind) return;
+    if(kind==='expense' && t.a>=0) return;
+    if(kind==='income' && t.a<=0) return;
+    totals[t.c]=(totals[t.c]||0)+Math.abs(t.a);
+  });
+  return Object.entries(totals).sort((a,b)=>b[1]-a[1]);
+}
+
+let dashExpChart=null, dashIncChart=null;
+const DASH_COLORS=['#4ade80','#60a5fa','#f472b6','#fbbf24','#a78bfa','#22d3ee','#fb923c','#94a3b8','#f87171','#34d399','#c084fc','#fcd34d'];
+
+function renderOneCatChart(entries, canvasId, barsId, existingChart, barColor){
+  const cv=document.getElementById(canvasId);
+  const barsBox=document.getElementById(barsId);
+  if(!cv) return existingChart;
+  if(existingChart) existingChart.destroy();
+  if(!entries.length){
+    if(barsBox) barsBox.innerHTML='<div class="empty" style="padding:10px;font-size:12px">ไม่มีข้อมูลช่วงนี้</div>';
+    return null;
   }
-  const detailBox=document.getElementById('dash-detail'); if(detailBox) detailBox.innerHTML = detail;
+  const total=entries.reduce((s,[k,v])=>s+v,0);
+  const labels=entries.map(([k,v])=>k);
+  let chart=null;
+  if(typeof Chart!=='undefined'){
+    chart=new Chart(cv,{
+      type:'doughnut',
+      data:{labels, datasets:[{data:entries.map(([k,v])=>Math.round(v)), backgroundColor:DASH_COLORS, borderWidth:0}]},
+      options:{responsive:true, maintainAspectRatio:false, cutout:'60%',
+        plugins:{
+          legend:{position:'bottom', labels:{color:'#9ca3af', font:{size:10}, padding:8, boxWidth:10}},
+          tooltip:{callbacks:{label:(c)=>c.label+': '+fmt(c.parsed)+' ('+(c.parsed/total*100).toFixed(1)+'%)'}}
+        }}
+    });
+  }
+  // bars — ranked, all categories
+  const max=entries[0][1];
+  let bars='';
+  entries.forEach(([c,v],i)=>{
+    bars += `<div style="margin-bottom:7px">
+      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px"><span>${c}</span><span style="font-weight:600">${fmt(v)} · ${(v/total*100).toFixed(0)}%</span></div>
+      <div style="height:6px;background:var(--surface2);border-radius:3px"><div style="height:100%;width:${(v/max*100).toFixed(0)}%;background:${barColor};border-radius:3px"></div></div>
+    </div>`;
+  });
+  if(barsBox) barsBox.innerHTML=bars;
+  return chart;
+}
+
+function renderCatCharts(yr, mo, typeFilter){
+  const expCard=document.getElementById('dash-exp-card');
+  const incCard=document.getElementById('dash-inc-card');
+  // expense charts
+  if(typeFilter!=='income'){
+    if(expCard) expCard.style.display='';
+    dashExpChart=renderOneCatChart(catTotalsFor(yr,mo,'expense'),'dashExpDoughnut','dashExpBars',dashExpChart,'var(--expense)');
+  } else {
+    if(expCard) expCard.style.display='none';
+  }
+  // income charts
+  if(typeFilter!=='expense'){
+    if(incCard) incCard.style.display='';
+    dashIncChart=renderOneCatChart(catTotalsFor(yr,mo,'income'),'dashIncDoughnut','dashIncBars',dashIncChart,'var(--income)');
+  } else {
+    if(incCard) incCard.style.display='none';
+  }
 }
 
 function getPeriodTotals(yr, mo){
@@ -2080,4 +2131,3 @@ document.getElementById('f-date').value=today();
 initPeriodSelectors();
 setType('expense');
 try{ renderDashboard(); renderLoan(); renderHealth(); renderDebt(); initDivYear(); }catch(e){console.log(e);}
-

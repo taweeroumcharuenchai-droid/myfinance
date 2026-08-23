@@ -141,7 +141,7 @@ function applyAppData(d){
   // missing loan/meta/accounts but we already HAVE them, keep the existing ones.
   const incomingMissing = [];
   if(!d.accounts || !Object.keys(d.accounts).length) incomingMissing.push('accounts');
-  if(!d.loan || !d.loan.actualPayments) incomingMissing.push('loan');
+  if(!d.loan || !d.loan.actualPayments || !d.loan.actualPayments.length || !d.loan.vongern) incomingMissing.push('loan');
   if(!d.meta || !d.meta.wallets || !d.meta.wallets.length) incomingMissing.push('meta');
   const haveExisting = (ACCOUNTS && Object.keys(ACCOUNTS).length>0) || (LOAN && LOAN.actualPayments) || (META.wallets && META.wallets.length>0);
   if(incomingMissing.length>0 && haveExisting){
@@ -154,7 +154,7 @@ function applyAppData(d){
     ACCOUNTS = d.accounts;
     if(typeof rebuildDerived==='function') rebuildDerived();
   }
-  if(d.loan && d.loan.actualPayments){ LOAN = d.loan; if(typeof rebuildDerived==='function') rebuildDerived(); }
+  if(d.loan && d.loan.actualPayments && d.loan.actualPayments.length && d.loan.vongern){ LOAN = d.loan; if(typeof rebuildDerived==='function') rebuildDerived(); }
   if(d.walletOverrides) walletOverrides = d.walletOverrides;
   if(d.meta){
     if(d.meta.cats && d.meta.cats.length) META.cats = d.meta.cats;
@@ -218,6 +218,18 @@ async function syncToDrive(force){
           syncing = true;
         }
       }catch(e){ /* if we can't read remote, fall through cautiously */ }
+    }
+
+    // ═══ CONFIG-LOSS GUARD ═══
+    // Never push an empty LOAN/config up to Drive — that's how the loan tab got wiped before.
+    // If our in-memory config is empty, we haven't really loaded yet; skip this sync.
+    const configEmpty = (!LOAN || !LOAN.actualPayments || !LOAN.actualPayments.length || !LOAN.vongern)
+                     || (!META.wallets || !META.wallets.length)
+                     || (!ACCOUNTS || !Object.keys(ACCOUNTS).length);
+    if(configEmpty){
+      console.warn('Sync guard: local config is empty (loan/meta/accounts) — refusing to push, would wipe Drive config.');
+      syncing = false;
+      return;
     }
 
     const data = JSON.stringify(gatherAppData());

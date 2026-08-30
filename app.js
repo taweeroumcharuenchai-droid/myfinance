@@ -354,6 +354,8 @@ function duplicateLast(){
   const catEl=document.getElementById('f-category'); if(catEl && last.c) catEl.value=last.c;
   const walEl=document.getElementById('f-wallet'); if(walEl && last.w) walEl.value=last.w;
   document.getElementById('f-note').value = last.n || '';
+  const itDup=document.getElementById('f-income-type');
+  if(itDup) itDup.value = (last.ty==='income' && last.incType) ? last.incType : '';
   document.getElementById('f-date').value = today();   // default to today, not the old date
   document.getElementById('f-amount').value = '';       // blank — you type the new amount
   document.getElementById('edit-index').value = -1;     // ensure it's a NEW record, not an edit
@@ -371,6 +373,7 @@ function setType(type){
   // for debt, updateDebtForm() decides (card=amount, loan=principal+interest)
   document.getElementById('grp-amount').style.display = (type==='invest'||type==='debt') ? 'none' : 'block';
   document.getElementById('grp-category').style.display = (type==='expense'||type==='income') ? 'block' : 'none';
+  document.getElementById('grp-income-type').style.display = (type==='income') ? 'block' : 'none';
   document.getElementById('grp-wallet').style.display = (type==='expense'||type==='income') ? 'block' : 'none';
   document.getElementById('grp-transfer').style.display = (type==='transfer') ? 'block' : 'none';
   document.getElementById('grp-invest').style.display = (type==='invest') ? 'block' : 'none';
@@ -554,6 +557,11 @@ function saveTx(){
   const wallet = document.getElementById('f-wallet').value;
   const sign = curType==='income' ? 1 : -1;
   const rec = { d:date, c:cat, a:amt*sign, w:wallet, n:note, ty:curType };
+  // tax income type — only for income (40(1)/40(2)/40(6))
+  if(curType==='income'){
+    const it = document.getElementById('f-income-type')?.value;
+    if(it) rec.incType = it;
+  }
   // VALIDATION GATE: block malformed records
   const _v = validateTx(rec);
   if(!_v.ok){ toast('❌ บันทึกไม่ได้: '+_v.msg); return; }
@@ -677,6 +685,9 @@ function editTx(i){
   document.getElementById('f-wallet').value=t.w;
   document.getElementById('f-date').value=t.d;
   document.getElementById('f-note').value=t.n||'';
+  // restore income type for income transactions
+  const itEl=document.getElementById('f-income-type');
+  if(itEl) itEl.value = (ty==='income' && t.incType) ? t.incType : '';
   document.getElementById('edit-index').value=i;
   document.getElementById('cancel-edit-btn').style.display='block';
   toast('กำลังแก้ไข — บันทึกเพื่อยืนยัน');

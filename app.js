@@ -1,3 +1,4 @@
+
 /* ═══════════════════════════════════════════════════════════════════════
    เงินของฉัน — Personal Finance App  (single-file, offline, localStorage)
    ───────────────────────────────────────────────────────────────────────
@@ -728,6 +729,189 @@ function renderAnalysis(){
   renderTrend(yr);
   renderCatDetail(yr, mo);
   renderPlanActual(yr, mo);
+  renderTaxSummary(yr);
+}
+
+// ============ TAX (ประมาณการภาษี) ============
+// Tax is annual — always computes for the full year (ignores month selector).
+// Income-type expense deductions per Thai Revenue Code:
+//   40(1) salary + 40(2) hire = 50% capped at 100,000 combined
+//   40(6) professional (doctor) = flat 60% deduction
+function computeTaxIncome(yr){
+  let s1=0, s2=0, s6=0, untagged=0;
+  txData.forEach(t=>{
+    if(t.d.slice(0,4)!==yr) return;
+    if(txType(t)!=='income' || t.a<=0) return;
+    const it=t.incType;
+    if(it==='40(1)') s1+=t.a;
+    else if(it==='40(2)') s2+=t.a;
+    else if(it==='40(6)') s6+=t.a;
+    else untagged+=t.a;
+  });
+  return { s1, s2, s6, untagged, gross:s1+s2+s6 };
+}
+
+// pull tax-deductible items from this year's data
+function computeTaxDeductions(yr){
+  let rmf=0, ssf=0, esg=0, insurance=0, donation=0;
+  txData.forEach(t=>{
+    if(t.d.slice(0,4)!==yr) return;
+    // RMF/SSF/ESG — from investment BUY transactions this year
+    if(t.ty==='invest' && t.invAction==='buy' && t.invName){
+      const n=t.invName.toUpperCase();
+      const amt=Math.abs(t.a);
+      if(n.includes('THAIESG')||n.includes('ESG')&&!n.includes('SSF')) esg+=amt;
+      else if(n.includes('RMF')) rmf+=amt;
+      else if(n.includes('SSF')) ssf+=amt;
+    }
+    // insurance + donation — from expense categories
+    if(txType(t)==='expense' && t.a<0){
+      const c=(t.c||'');
+      if(/insurance|ประกัน/i.test(c)) insurance+=Math.abs(t.a);
+      if(/donation|บริจาค|ทำบุญ/i.test(c)) donation+=Math.abs(t.a);
+    }
+  });
+  return { rmf, ssf, esg, insurance, donation };
+}
+
+// progressive Thai personal income tax (2568/2025 brackets)
+function calcThaiTax(netIncome){
+  const brackets=[
+    [0,150000,0],
+    [150000,300000,0.05],
+    [300000,500000,0.10],
+    [500000,750000,0.15],
+    [750000,1000000,0.20],
+    [1000000,2000000,0.25],
+    [2000000,5000000,0.30],
+    [5000000,Infinity,0.35],
+  ];
+  let tax=0;
+  for(const [lo,hi,rate] of brackets){
+    if(netIncome>lo){ tax += (Math.min(netIncome,hi)-lo)*rate; }
+  }
+  return tax;
+}
+
+// which bracket is the marginal rate for this net income?
+function marginalRate(netIncome){
+  if(netIncome<=150000) return 0;
+  if(netIncome<=300000) return 5;
+  if(netIncome<=500000) return 10;
+  if(netIncome<=750000) return 15;
+  if(netIncome<=1000000) return 20;
+  if(netIncome<=2000000) return 25;
+  if(netIncome<=5000000) return 30;
+  return 35;
+}
+
+function renderTaxSummary(yr){
+  const box=document.getElementById('tax-income-summary');
+  if(!box) return;
+  const t=computeTaxIncome(yr);
+  const d=computeTaxDeductions(yr);
+  // manual overrides (stored in memory for the session)
+  window._taxOverride = window._taxOverride || {};
+  const ov = window._taxOverride;
+  const row=(label,val,cls)=>`<div style="display:flex;justify-content:space-between;padding:5px 0;font-size:13px"><span>${label}</span><span style="font-weight:600${cls?';color:'+cls:''}">${fmt(val)}</span></div>`;
+
+  let html='';
+  // ===== INCOME BY TYPE (raw, no deduction) =====
+  html += `<div style="font-weight:700;margin-bottom:6px;font-size:13px">รายได้แยกประเภท (ปี ${parseInt(yr)+543})</div>`;
+  html += row('40(1) เงินเดือน', t.s1);
+  html += row('40(2) ค่าจ้าง/ที่ปรึกษา', t.s2);
+  html += row('40(6) วิชาชีพแพทย์', t.s6);
+  if(t.untagged>0) html += row('⚠️ ยังไม่ระบุประเภท', t.untagged, '#e0a800');
+  html += `<div style="border-top:1px solid var(--border,#2a2f3a);margin:6px 0"></div>`;
+  html += row('รวมรายได้', t.gross, 'var(--accent,#3b82f6)');
+
+  // ===== DEDUCTIONS (auto-pulled + editable) =====
+  html += `<div style="font-weight:700;margin:12px 0 6px;font-size:13px">ค่าลดหย่อน (ดึงจากข้อมูลปีนี้)</div>`;
+  const dedRow=(label,key,autoVal,cap)=>{
+    const val = (ov[key]!==undefined) ? ov[key] : autoVal;
+    const edited = ov[key]!==undefined;
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;font-size:13px">
+      <span>${label}${cap?` <span style="color:var(--txt3);font-size:11px">(เพดาน ${fmt(cap)})</span>`:''}</span>
+      <span>
+        <input type="number" value="${Math.round(val)}" onchange="setTaxOverride('${key}',this.value)"
+          style="width:100px;text-align:right;font-weight:600;padding:3px 6px;border-radius:6px;border:1px solid var(--border,#2a2f3a);background:${edited?'var(--surface2)':'transparent'}"/>
+      </span></div>`;
+  };
+  html += dedRow('RMF', 'rmf', d.rmf, 500000);
+  html += dedRow('SSF', 'ssf', d.ssf, 200000);
+  html += dedRow('Thai ESG', 'esg', d.esg, 300000);
+  html += dedRow('ประกันชีวิต+สุขภาพ', 'insurance', d.insurance, 100000);
+  html += dedRow('เงินบริจาค', 'donation', d.donation, null);
+  html += `<div style="margin-top:6px;font-size:11px;color:var(--txt3)">ช่องแก้ไขได้ — ตัวเลขดึงอัตโนมัติจากรายการ ปรับเองได้ถ้าไม่ตรง</div>`;
+
+  const totalDed = ['rmf','ssf','esg','insurance','donation'].reduce((s,k)=> s + (ov[k]!==undefined?parseFloat(ov[k])||0:d[k]), 0);
+  html += `<div style="border-top:1px solid var(--border,#2a2f3a);margin:6px 0"></div>`;
+  html += row('รวมค่าลดหย่อน (จากส่วนนี้)', totalDed, 'var(--income)');
+
+  // ===== EXPENSE DEDUCTION (auto 50%/60%, editable) =====
+  const autoExp12 = Math.min((t.s1+t.s2)*0.5, 100000);
+  const autoExp6  = t.s6*0.6;
+  const exp12 = (ov.exp12!==undefined) ? parseFloat(ov.exp12)||0 : autoExp12;
+  const exp6  = (ov.exp6!==undefined)  ? parseFloat(ov.exp6)||0  : autoExp6;
+  html += `<div style="font-weight:700;margin:12px 0 6px;font-size:13px">หักค่าใช้จ่าย (แก้ได้)</div>`;
+  const expRow=(label,key,val,edited)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;font-size:13px">
+    <span>${label}</span>
+    <input type="number" value="${Math.round(val)}" onchange="setTaxOverride('${key}',this.value)"
+      style="width:100px;text-align:right;font-weight:600;padding:3px 6px;border-radius:6px;border:1px solid var(--border,#2a2f3a);background:${edited?'var(--surface2)':'transparent'}"/></div>`;
+  html += expRow('40(1)+40(2) หัก 50% (max 100k)', 'exp12', exp12, ov.exp12!==undefined);
+  html += expRow('40(6) หักเหมา 60%', 'exp6', exp6, ov.exp6!==undefined);
+
+  // ===== PERSONAL ALLOWANCE =====
+  const personal = (ov.personal!==undefined) ? parseFloat(ov.personal)||0 : 60000;
+  html += `<div style="font-weight:700;margin:12px 0 6px;font-size:13px">ลดหย่อนส่วนตัว</div>`;
+  html += expRow('ค่าลดหย่อนส่วนตัว (แก้เพิ่มคู่สมรส/บุตร/พ่อแม่ได้)', 'personal', personal, ov.personal!==undefined);
+
+  // ===== NET INCOME & TAX =====
+  const netIncome = Math.max(0, t.gross - exp12 - exp6 - totalDed - personal);
+  const tax = calcThaiTax(netIncome);
+  const mRate = marginalRate(netIncome);
+  html += `<div style="border-top:2px solid var(--accent,#3b82f6);margin:10px 0"></div>`;
+  html += row('เงินได้พึงประเมิน', t.gross);
+  html += row('− ค่าใช้จ่าย', -(exp12+exp6), 'var(--expense)');
+  html += row('− ค่าลดหย่อน', -(totalDed+personal), 'var(--expense)');
+  html += `<div style="display:flex;justify-content:space-between;padding:8px 0;font-size:15px;font-weight:800"><span>เงินได้สุทธิ</span><span style="color:var(--accent,#3b82f6)">${fmt(netIncome)}</span></div>`;
+  html += `<div style="display:flex;justify-content:space-between;padding:8px 12px;font-size:16px;font-weight:800;background:var(--surface2);border-radius:10px;margin-top:4px"><span>ภาษีโดยประมาณ</span><span style="color:var(--expense)">${fmt(tax)}</span></div>`;
+  html += `<div style="font-size:12px;color:var(--txt3);margin-top:4px">อัตราภาษีขั้นสูงสุดของคุณ (marginal): ${mRate}%</div>`;
+
+  // ===== OPTIMIZATION ADVICE =====
+  html += `<div style="font-weight:700;margin:14px 0 6px;font-size:13px">💡 คำแนะนำลดหย่อนเพิ่ม</div>`;
+  const advice=[];
+  // RMF room (cap 500k, and 30% of income — use lower)
+  const rmfNow = ov.rmf!==undefined?parseFloat(ov.rmf)||0:d.rmf;
+  const rmfCap = Math.min(500000, t.gross*0.30);
+  const rmfRoom = Math.max(0, rmfCap - rmfNow);
+  const ssfNow = ov.ssf!==undefined?parseFloat(ov.ssf)||0:d.ssf;
+  const ssfRoom = Math.max(0, Math.min(200000, t.gross*0.30) - ssfNow);
+  const esgNow = ov.esg!==undefined?parseFloat(ov.esg)||0:d.esg;
+  const esgRoom = Math.max(0, Math.min(300000, t.gross*0.30) - esgNow);
+  if(mRate>0){
+    if(rmfRoom>1000) advice.push(`ซื้อ RMF เพิ่มได้อีก ~${fmt(rmfRoom)} → ประหยัดภาษีสูงสุด ~${fmt(rmfRoom*mRate/100)} (ที่ ${mRate}%)`);
+    if(ssfRoom>1000) advice.push(`ซื้อ SSF เพิ่มได้อีก ~${fmt(ssfRoom)} → ประหยัด ~${fmt(ssfRoom*mRate/100)}`);
+    if(esgRoom>1000) advice.push(`ซื้อ Thai ESG เพิ่มได้อีก ~${fmt(esgRoom)} → ประหยัด ~${fmt(esgRoom*mRate/100)}`);
+  } else {
+    advice.push('เงินได้สุทธิยังไม่ถึงเกณฑ์เสียภาษี (150,000) — ไม่จำเป็นต้องซื้อลดหย่อนเพิ่มเพื่อภาษี');
+  }
+  html += advice.map(a=>`<div style="padding:6px 10px;margin-bottom:5px;background:var(--surface2);border-radius:8px;font-size:12px;border-left:3px solid var(--income)">${a}</div>`).join('');
+
+  if(t.untagged>0){
+    html += `<div style="margin-top:10px;padding:8px;background:var(--surface2);border-radius:8px;font-size:12px;color:#e0a800">
+      ⚠️ มีรายได้ ${fmt(t.untagged)} ที่ยังไม่ระบุประเภท — ตัวเลขภาษียังไม่รวมส่วนนี้ ระบุประเภทให้ครบเพื่อความแม่นยำ</div>`;
+  }
+  html += `<div style="margin-top:8px;font-size:11px;color:var(--txt3)">* ประมาณการเพื่อวางแผน ไม่ใช่ตัวเลขยื่นจริง — ตรวจกับสรรพากร/นักบัญชีก่อนยื่น</div>`;
+  box.innerHTML=html;
+}
+
+function setTaxOverride(key, val){
+  window._taxOverride = window._taxOverride || {};
+  if(val===''||val===null){ delete window._taxOverride[key]; }
+  else window._taxOverride[key] = parseFloat(val)||0;
+  const yr=document.getElementById('a-year')?.value;
+  if(yr) renderTaxSummary(yr);
 }
 function renderBars(obj,color){
   const items=Object.entries(obj).sort((a,b)=>b[1]-a[1]).slice(0,10);
@@ -2142,3 +2326,4 @@ document.getElementById('f-date').value=today();
 initPeriodSelectors();
 setType('expense');
 try{ renderDashboard(); renderLoan(); renderHealth(); renderDebt(); initDivYear(); }catch(e){console.log(e);}
+

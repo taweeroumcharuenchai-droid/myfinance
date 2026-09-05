@@ -1,4 +1,3 @@
-
 /* ═══════════════════════════════════════════════════════════════════════
    เงินของฉัน — Personal Finance App  (single-file, offline, localStorage)
    ───────────────────────────────────────────────────────────────────────
@@ -2326,4 +2325,3 @@ document.getElementById('f-date').value=today();
 initPeriodSelectors();
 setType('expense');
 try{ renderDashboard(); renderLoan(); renderHealth(); renderDebt(); initDivYear(); }catch(e){console.log(e);}
-

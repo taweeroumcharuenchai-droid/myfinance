@@ -934,7 +934,7 @@ function renderTrend(yr){
 
 // ============ PORTFOLIO ============
 let portTab='all';
-const PORT_LABELS={all:'ทั้งหมด',thai:'หุ้นไทย',us:'หุ้น US',etf:'ETF',fund:'กองทุน'};
+const PORT_LABELS={all:'ทั้งหมด',thai:'หุ้นไทย',us:'หุ้น US',etf:'ETF',fund:'กองทุน',bond:'ตราสารหนี้',gold:'ทอง'};
 function holdingValue(h){
   if(h.lump) return {cost:h.lumpCost, val:h.lumpValue};
   const mult = h.ccy==='USD'?FX:1;
@@ -2022,7 +2022,7 @@ function renderValidation(){
 
   // CHECK 3: Portfolio value via two paths
   const pv1=getPortfolioValue();
-  let pv2=0; ['thai','us','etf','fund','gold'].forEach(p=>{ holdings.filter(h=>h.port===p).forEach(h=>pv2+=holdingValue(h).val); });
+  let pv2=0; ['thai','us','etf','fund','gold','bond'].forEach(p=>{ holdings.filter(h=>h.port===p).forEach(h=>pv2+=holdingValue(h).val); });
   checks.push({
     name:'มูลค่าพอร์ต (รวม vs แยก port)',
     a:'รวมตรง: '+fmt(pv1),

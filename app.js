@@ -945,6 +945,83 @@ function renderPortTabs(){
   document.getElementById('port-tabs').innerHTML=Object.entries(PORT_LABELS).map(([k,l])=>`<button class="port-tab ${k===portTab?'active':''}" onclick="setPortTab('${k}')">${l}</button>`).join('');
 }
 function setPortTab(t){ portTab=t; renderPort(); }
+
+// ===== Investment activity log (read-only view; no data created) =====
+let expandedAsset=null;   // which asset's history is open
+let showSold=false;       // show fully-sold / closed positions
+function toggleShowSold(){ showSold=!showSold; expandedAsset=null; renderPort(); }
+let _portRowNames=[];     // maps rendered row index -> asset name
+function toggleAssetHistory(i){ const nm=_portRowNames[i]; expandedAsset = (expandedAsset===nm)?null:nm; renderPort(); }
+
+// legacy notes may be "ซื้อ X", "ขาย X", "สับเปลี่ยน X ไป Y", or "X (หมายเหตุ)" — normalize to the base asset name + action
+function legacyAction(note){
+  const n=(note||'').trim();
+  if(n.startsWith('ขาย')) return 'sell';
+  if(n.startsWith('สับเปลี่ยน')) return 'switch';
+  return 'buy';
+}
+function legacyBaseName(note){
+  let n=(note||'').trim();
+  n=n.replace(/^(ซื้อ|ขาย|สับเปลี่ยน)(กองทุน)?\s+/,''); // drop leading verb ("ขาย", "ขายกองทุน", ...)
+  n=n.split(' ไป ')[0];                            // switch source only
+  // drop a trailing "(...)" ONLY when it's a free-text note (has space/Thai/digit/฿),
+  // keep real share classes like "(A)", "(SSF)", "(ADR)"
+  n=n.replace(/\s*\(([^)]*)\)\s*$/, (m,inner)=> /[\sก-๙0-9฿]/.test(inner) ? '' : m);
+  n=n.replace(/\s*\([^)]*$/,'');                    // drop an unclosed "(note..." tail
+  return n.trim();
+}
+// collect all buy/sell/switch activity for one asset name (new invest tx + legacy log)
+function assetActivity(name){
+  const out=[];
+  txData.forEach(t=>{
+    const isInvest = t.ty==='invest';
+    const isLegacy = (typeof PURCHASE_LOG_WALLETS!=='undefined') && PURCHASE_LOG_WALLETS.includes(t.w);
+    if(isInvest){
+      let nm=t.invName, units=t.invUnits, price=t.invPrice, action=t.invAction;
+      if(units===undefined || !nm){
+        const m=(t.n||'').match(/^(ซื้อ|ขาย)\s+(.+?)\s+([\d.]+)@([\d.]+)/);
+        if(m){ action=m[1]==='ซื้อ'?'buy':'sell'; nm=m[2]; units=parseFloat(m[3]); price=parseFloat(m[4]); }
+      }
+      if(nm===name) out.push({d:t.d, action:action||'buy', units, price, amt:Math.abs(t.a||0), src:t.w, legacy:false});
+    } else if(isLegacy){
+      if(legacyBaseName(t.n)===name){
+        out.push({d:t.d, action:legacyAction(t.n), units:null, price:null, amt:Math.abs(t.a||0), src:'เก่า', legacy:true});
+      }
+    }
+  });
+  out.sort((a,b)=>(b.d||'').localeCompare(a.d||''));
+  return out;
+}
+// all asset names that ever appear in the activity log (held or sold)
+function allActivityAssetNames(){
+  const names=new Set();
+  txData.forEach(t=>{
+    if(t.ty==='invest'){
+      let nm=t.invName;
+      if(!nm){ const m=(t.n||'').match(/^(ซื้อ|ขาย)\s+(.+?)\s+([\d.]+)@([\d.]+)/); if(m) nm=m[2]; }
+      if(nm) names.add(nm);
+    } else if((typeof PURCHASE_LOG_WALLETS!=='undefined') && PURCHASE_LOG_WALLETS.includes(t.w)){
+      const base=legacyBaseName(t.n); if(base) names.add(base);
+    }
+  });
+  return [...names];
+}
+// render the expandable history block for one asset
+function assetHistoryHTML(name){
+  const acts=assetActivity(name);
+  if(!acts.length) return '<div class="empty" style="padding:10px">ไม่มีประวัติ</div>';
+  const actLabel={buy:'ซื้อ', sell:'ขาย', switch:'สับเปลี่ยน'};
+  const actColor={buy:'var(--income)', sell:'var(--expense)', switch:'var(--accent)'};
+  return '<div class="asset-history">'+acts.map(a=>{
+    const d=(a.d||'').slice(5);
+    const detail = a.legacy
+      ? `${fmt(a.amt)} <span style="color:var(--txt3)">(เก่า · ไม่มีหน่วย)</span>`
+      : `${a.units} หน่วย @${a.price} · ${fmt(a.amt)}`;
+    const src = a.src && a.src!=='เก่า' ? ` <span style="color:var(--txt3)">(จาก ${a.src})</span>` : '';
+    return `<div class="ah-row"><span class="ah-date">${d}</span><span class="ah-act" style="color:${actColor[a.action]||'var(--txt2)'}">${actLabel[a.action]||a.action}</span><span class="ah-detail">${detail}${src}</span></div>`;
+  }).join('')+'</div>';
+}
+
 function renderPort(){
   renderPortTabs();
   let totalCost=0,totalVal=0;
@@ -965,24 +1042,52 @@ function renderPort(){
   document.getElementById('p-by-type').innerHTML=renderAllocBars(byType,totalVal);
   document.getElementById('p-by-region').innerHTML=renderAllocBars(byRegion,totalVal);
 
-  // holdings list
+  // holdings list (each row expands to show its buy/sell/switch history)
   let list = portTab==='all'?holdings:holdings.filter(h=>h.port===portTab);
   list = list.map((h,i)=>({h, gi:holdings.indexOf(h)})).sort((a,b)=>holdingValue(b.h).val-holdingValue(a.h).val);
-  document.getElementById('port-holdings').innerHTML = list.length?list.map(({h,gi})=>{
+  _portRowNames=[];   // rebuild index->name map for click handlers
+  let rowIdx=0;
+  let holdHTML = list.length?list.map(({h,gi})=>{
     const {cost,val}=holdingValue(h);
     const g=val-cost, pct=cost>0?(g/cost*100).toFixed(1):'0';
-    const priceDisplay = h.lump ? '—' : (h.curPrice||h.avgCost).toLocaleString(undefined,{maximumFractionDigits:2});
     const asofTag = h.asof ? ` · <span style="color:var(--income)">อัพเดต ${h.asof.slice(5)}</span>` : '';
-    const unitsTag = h.lump ? '' : ` · <span onclick="editHolding(${gi})" style="cursor:pointer;text-decoration:underline dotted">${h.units} หน่วย ✎</span>`;
-    return `<div class="holding">
-      <div class="h-name">${h.name}<div style="font-size:11px;color:var(--txt3);font-weight:400">${h.type} · ${h.region}${unitsTag}${asofTag}</div></div>
+    const unitsTag = h.lump ? '' : ` · <span onclick="event.stopPropagation();editHolding(${gi})" style="cursor:pointer;text-decoration:underline dotted">${h.units} หน่วย ✎</span>`;
+    const acts = assetActivity(h.name);
+    const lastTag = acts.length ? ` · <span style="color:var(--txt3)">${acts.length} รายการ · ล่าสุด ${(acts[0].d||'').slice(5)}</span>` : '';
+    const open = expandedAsset===h.name;
+    const caret = acts.length ? `<span style="color:var(--txt3);margin-left:6px">${open?'▾':'▸'}</span>` : '';
+    const ri=rowIdx++; _portRowNames[ri]=h.name;
+    return `<div class="holding" style="cursor:pointer" onclick="toggleAssetHistory(${ri})">
+      <div class="h-name">${h.name}${caret}<div style="font-size:11px;color:var(--txt3);font-weight:400">${h.type} · ${h.region}${unitsTag}${asofTag}${lastTag}</div></div>
       <div class="h-val">
         <div class="h-mkt">${fmt(val)}</div>
         <div class="h-pct ${g>=0?'pos':'neg'}">${g>=0?'+':''}${pct}%</div>
-        ${h.lump?'':`<div class="h-price" onclick="editHolding(${gi})">แก้ไข ✎</div>`}
+        ${h.lump?'':`<div class="h-price" onclick="event.stopPropagation();editHolding(${gi})">แก้ไข ✎</div>`}
       </div>
-    </div>`;
+    </div>${open?assetHistoryHTML(h.name):''}`;
   }).join('') : '<div class="empty">ไม่มีรายการ</div>';
+
+  // optional: fully-sold / closed positions (in the log but not in current holdings)
+  if(showSold){
+    const heldNames=new Set(holdings.map(h=>h.name));
+    let sold=allActivityAssetNames().filter(n=>!heldNames.has(n));
+    // keep only ones relevant to the selected port tab when possible (best-effort: show all if 'all')
+    sold.sort();
+    if(sold.length){
+      holdHTML += `<div class="card-title" style="margin-top:14px;font-size:12px;color:var(--txt3)">กองที่ขาย/ปิดไปแล้ว (${sold.length})</div>`;
+      holdHTML += sold.map(n=>{
+        const acts=assetActivity(n);
+        const last=acts.length?(acts[0].d||'').slice(5):'';
+        const open=expandedAsset===n;
+        const ri=rowIdx++; _portRowNames[ri]=n;
+        return `<div class="holding" style="cursor:pointer;opacity:.6" onclick="toggleAssetHistory(${ri})">
+          <div class="h-name">${n} <span style="color:var(--txt3)">${open?'▾':'▸'}</span><div style="font-size:11px;color:var(--txt3);font-weight:400">ขาย/ปิดแล้ว · ${acts.length} รายการ · ล่าสุด ${last}</div></div>
+          <div class="h-val"><div class="h-mkt" style="color:var(--txt3)">—</div></div>
+        </div>${open?assetHistoryHTML(n):''}`;
+      }).join('');
+    }
+  }
+  document.getElementById('port-holdings').innerHTML = holdHTML;
 
   // cash reserve per investment wallet (backward calc: money in - holdings cost)
   const invWallets = Object.keys(WALLET_PORTS);
@@ -1807,7 +1912,8 @@ let walletSummaryExpanded = false;
 function renderWalletSummary(){
   const el=document.getElementById('wallet-summary');
   if(!el) return;
-  const walletsInUse=[...new Set(txData.map(t=>t.w).filter(Boolean))];
+  // hide purchase_log (legacy fund log) accounts — their activity now lives in the Portfolio tab
+  const walletsInUse=[...new Set(txData.map(t=>t.w).filter(Boolean))].filter(w=>!((typeof PURCHASE_LOG_WALLETS!=='undefined') && PURCHASE_LOG_WALLETS.includes(w)));
   const balances = walletsInUse.map(w=>({w, bal:walletBalance(w)}))
     .sort((a,b)=>{ if(a.bal===null)return 1; if(b.bal===null)return -1; return Math.abs(b.bal)-Math.abs(a.bal); });
   const shown = walletSummaryExpanded ? balances : balances.slice(0,5);

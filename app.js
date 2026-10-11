@@ -321,7 +321,7 @@ function goTab(page){
   document.getElementById('page-'+page).classList.add('active');
   document.querySelector('.tab[data-page="'+page+'"]').classList.add('active');
   window.scrollTo(0,0);
-  if(page==='home'){ renderDashboard(); renderHealth(); }
+  if(page==='home'){ renderDashboard(); renderHealth(); renderFIRE(); }
   if(page==='list') renderList();
   if(page==='analysis') renderAnalysis();
   if(page==='port') renderPort();
@@ -1738,6 +1738,42 @@ function renderLoan(){
 }
 
 // ============ HEALTH / FINANCIAL RATIOS ============
+// Bond funds the user keeps as liquid emergency reserve (editable list).
+const EMERGENCY_BONDS = ['KTSTPLUS-A','KTILF'];
+
+// ===== FIRE gauge: how much of monthly expense is covered by passive income =====
+let fireYield = 4;  // expected annual yield (%) used for the "asset still needed" estimate
+function renderFIRE(){
+  const el=document.getElementById('fire-content'); if(!el) return;
+  const yEl=document.getElementById('fire-yield'); if(yEl && yEl.value!=='') fireYield=parseFloat(yEl.value)||4;
+  // passive income = last 12 months of "Interest Money" (dividends + interest + REIT) ÷ 12
+  const now=new Date();
+  const cutoff=new Date(now.getFullYear()-1, now.getMonth(), now.getDate()).toISOString().slice(0,10);
+  let pi12=0; txData.forEach(t=>{ if(t.c==='Interest Money' && (t.a||0)>0 && (t.d||'')>=cutoff) pi12+=t.a; });
+  const passiveM=pi12/12;
+  const expenseM=(computeHealthAuto().expense)||1;
+  const cov=passiveM/expenseM*100;
+  const gap=Math.max(0, expenseM-passiveM);
+  const col = cov>=100?'var(--income)':cov>=50?'var(--transfer)':'var(--expense)';
+  const pct=Math.max(0,Math.min(100,cov));
+  el.innerHTML=`
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:6px">
+      <div style="font-size:36px;font-weight:800;color:${col}">${cov.toFixed(0)}%</div>
+      <div style="font-size:12px;color:var(--txt3);text-align:right">ทรัพย์สินเลี้ยงคุณได้<br>${cov.toFixed(0)}% ของรายจ่าย</div>
+    </div>
+    <div class="bar-track" style="height:12px;margin-bottom:12px"><div class="bar-fill" style="width:${pct}%;background:${col};height:12px"></div></div>
+    <div class="holding"><div class="h-name" style="font-size:13px">รายได้จากทรัพย์สิน/เดือน<div style="font-size:11px;color:var(--txt3);font-weight:400">ปันผล+ดอกเบี้ย 12 เดือนล่าสุด ÷ 12</div></div><div class="h-val"><div class="h-mkt" style="color:var(--income)">${fmt(passiveM)}</div></div></div>
+    <div class="holding"><div class="h-name" style="font-size:13px">รายจ่าย/เดือน<div style="font-size:11px;color:var(--txt3);font-weight:400">เฉลี่ย 3 เดือน</div></div><div class="h-val"><div class="h-mkt">${fmt(expenseM)}</div></div></div>
+    <div class="holding"><div class="h-name" style="font-size:13px">ขาดอีก/เดือน (ถึงเป้า 100%)</div><div class="h-val"><div class="h-mkt ${gap>0?'neg':'pos'}">${gap>0?fmt(gap):'ถึงเป้าแล้ว 🎉'}</div></div></div>`;
+  const aEl=document.getElementById('fire-asset');
+  if(aEl){
+    const need = fireYield>0 ? gap*12/(fireYield/100) : 0;
+    aEl.innerHTML = gap>0
+      ? `ต้องมีสินทรัพย์สร้างรายได้เพิ่มอีก ~<b>${fmt(need)}</b> (ที่ผลตอบแทน ${fireYield}%/ปี) เพื่อให้รายได้จากทรัพย์สินครอบคลุมรายจ่ายทั้งหมด`
+      : `🎉 รายได้จากทรัพย์สินครอบคลุมรายจ่ายแล้ว — ถึงจุดอิสรภาพการเงิน`;
+  }
+}
+
 // Auto-derive the 5 health inputs from real app data (3-month average), so the
 // ratios work WITHOUT manual typing. Manual entries in the fields override these.
 function computeHealthAuto(){
@@ -1756,9 +1792,11 @@ function computeHealthAuto(){
     });
   }
   const income=inc/3, expense=exp/3, debtPay=debt/3;
-  let liquid=0;                               // bank balances (positive) + cash waiting to invest
+  // Liquid = all bank balances (your set/override balances apply) + the emergency-reserve
+  // bond funds you actually keep for liquidity. NOT other bonds, NOT un-deployed invest cash.
+  let liquid=0;
   accountsByType('bank').forEach(w=>{ const b=walletBalance(w); if(typeof b==='number' && b>0) liquid+=b; });
-  if(typeof getInvestmentCash==='function') liquid+=Math.max(0, getInvestmentCash());
+  holdings.forEach(h=>{ if(EMERGENCY_BONDS.includes(h.name)) liquid+=holdingValue(h).val; });
   return { liquid:Math.round(liquid), income:Math.round(income), expense:Math.round(expense), essential:Math.round(expense), debtPay:Math.round(debtPay) };
 }
 function resetHealthInputs(){
@@ -2475,4 +2513,4 @@ fillCategories();
 document.getElementById('f-date').value=today();
 initPeriodSelectors();
 setType('expense');
-try{ renderDashboard(); renderLoan(); renderHealth(); renderDebt(); initDivYear(); }catch(e){console.log(e);}
+try{ renderDashboard(); renderLoan(); renderHealth(); renderFIRE(); renderDebt(); initDivYear(); }catch(e){console.log(e);}

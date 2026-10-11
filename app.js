@@ -754,12 +754,23 @@ function computeTaxIncome(yr){
 function computeTaxDeductions(yr){
   let rmf=0, ssf=0, esg=0, insurance=0, donation=0;
   txData.forEach(t=>{
-    if(t.d.slice(0,4)!==yr) return;
-    // RMF/SSF/ESG — from investment BUY transactions this year
-    if(t.ty==='invest' && t.invAction==='buy' && t.invName){
-      const n=t.invName.toUpperCase();
-      const amt=Math.abs(t.a);
-      if(n.includes('THAIESG')||n.includes('ESG')&&!n.includes('SSF')) esg+=amt;
+    if(!t.d || t.d.slice(0,4)!==yr) return;
+    // RMF/SSF/ESG — count BUY contributions this year, from ANY entry style:
+    //   (1) structured invest, (2) half-structured invest (parse note), (3) legacy purchase-log.
+    //   Exclude sells and fund switches (RMF->RMF switch is not a new deductible contribution).
+    let name=null, action=null;
+    const isLegacy=(typeof PURCHASE_LOG_WALLETS!=='undefined') && PURCHASE_LOG_WALLETS.includes(t.w);
+    if(t.ty==='invest'){
+      name=t.invName; action=t.invAction;
+      if(!name){ const m=(t.n||'').match(/^(ซื้อ|ขาย)\s+(.+?)\s+([\d.]+)@([\d.]+)/); if(m){ name=m[2]; action=(m[1]==='ซื้อ'?'buy':'sell'); } }
+      if(!action) action='buy';
+    } else if(isLegacy){
+      name=legacyBaseName(t.n); action=legacyAction(t.n);
+    }
+    if(name && action==='buy'){
+      const n=name.toUpperCase();
+      const amt=Math.abs(t.a||0);
+      if(n.includes('THAIESG') || (n.includes('ESG') && !n.includes('SSF'))) esg+=amt;
       else if(n.includes('RMF')) rmf+=amt;
       else if(n.includes('SSF')) ssf+=amt;
     }

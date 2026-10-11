@@ -321,7 +321,7 @@ function goTab(page){
   document.getElementById('page-'+page).classList.add('active');
   document.querySelector('.tab[data-page="'+page+'"]').classList.add('active');
   window.scrollTo(0,0);
-  if(page==='home') renderDashboard();
+  if(page==='home'){ renderDashboard(); renderHealth(); }
   if(page==='list') renderList();
   if(page==='analysis') renderAnalysis();
   if(page==='port') renderPort();
@@ -1738,7 +1738,41 @@ function renderLoan(){
 }
 
 // ============ HEALTH / FINANCIAL RATIOS ============
+// Auto-derive the 5 health inputs from real app data (3-month average), so the
+// ratios work WITHOUT manual typing. Manual entries in the fields override these.
+function computeHealthAuto(){
+  const now=new Date();
+  let inc=0, exp=0, debt=0;
+  for(let k=1;k<=3;k++){                     // last 3 COMPLETE calendar months
+    const d=new Date(now.getFullYear(), now.getMonth()-k, 1);
+    const yr=String(d.getFullYear()), mo=d.getMonth();
+    const t=getPeriodTotals(yr, mo);
+    inc+=t.income; exp+=t.expense;
+    txData.forEach(x=>{
+      if(!x.d || x.d.slice(0,4)!==yr) return;
+      if(new Date(x.d).getMonth()!==mo) return;
+      if(x.ty==='debt') debt+=Math.abs(x.a||0);          // principal + card payment
+      else if(x.c==='Loan interest') debt+=Math.abs(x.a||0); // loan interest
+    });
+  }
+  const income=inc/3, expense=exp/3, debtPay=debt/3;
+  let liquid=0;                               // bank balances (positive) + cash waiting to invest
+  accountsByType('bank').forEach(w=>{ const b=walletBalance(w); if(typeof b==='number' && b>0) liquid+=b; });
+  if(typeof getInvestmentCash==='function') liquid+=Math.max(0, getInvestmentCash());
+  return { liquid:Math.round(liquid), income:Math.round(income), expense:Math.round(expense), essential:Math.round(expense), debtPay:Math.round(debtPay) };
+}
+function resetHealthInputs(){
+  ['h-liquid','h-income','h-expense','h-essential','h-debt-pay'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+  renderHealth();
+}
+
 function renderHealth(){
+  // auto-fill any EMPTY field with the data-derived value; typed values stay as overrides
+  const _auto=computeHealthAuto();
+  const _fill=(id,val)=>{ const el=document.getElementById(id); if(el && (el.value===''||el.value==null)) el.value=val; };
+  _fill('h-liquid',_auto.liquid); _fill('h-income',_auto.income); _fill('h-expense',_auto.expense);
+  _fill('h-essential',_auto.essential); _fill('h-debt-pay',_auto.debtPay);
+
   const liquid = parseFloat(document.getElementById('h-liquid').value)||0;
   const income = parseFloat(document.getElementById('h-income').value)||1;
   const expense = parseFloat(document.getElementById('h-expense').value)||0;

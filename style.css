@@ -204,3 +204,11 @@ html,body{font-size:17px}
 .dc-label{font-size:12px;color:var(--txt3);margin-bottom:4px}
 .dc-val{font-size:20px;font-weight:700}
 .dc-sub{font-size:11px;color:var(--txt3);margin-top:2px}
+
+/* Investment activity history (Portfolio tab) */
+.asset-history{background:rgba(255,255,255,.02);border-left:2px solid var(--accent);margin:0 0 8px 8px;padding:6px 10px;border-radius:0 6px 6px 0}
+.ah-row{display:flex;gap:10px;align-items:baseline;padding:3px 0;font-size:12px;border-bottom:1px solid rgba(255,255,255,.04)}
+.ah-row:last-child{border-bottom:none}
+.ah-date{color:var(--txt3);min-width:44px;flex-shrink:0}
+.ah-act{font-weight:600;min-width:52px;flex-shrink:0}
+.ah-detail{color:var(--txt2);flex:1}
